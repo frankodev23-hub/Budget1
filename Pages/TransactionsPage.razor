@@ -1,0 +1,1151 @@
+﻿@page "/transactions"
+@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject Budget1.Data.BudgetDbContext DbContext
+@using System.Globalization
+@using System.Reflection
+@using System.ComponentModel.DataAnnotations
+@inject IJSRuntime JS
+
+<h3>Transactions</h3>
+
+@if (transactions == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!transactions.Any())
+{
+    <p><em>No transactions available yet.</em></p>
+}
+else
+{
+    <input type="text" class="form-control mb-3" placeholder="Search transactions..."
+           @bind="searchTerm" @bind:event="oninput" />
+
+    <table class="table table-striped mb-4">
+        <thead>
+            <tr>
+                @* <th>Id</th> *@
+                
+                <th>Name</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Date</th>
+                <th>Wallet</th>
+                @* <th>Income?</th> *@
+                <th>Category</th>
+                <th>Recurring?</th>
+               @*  <th>Recurrence Interval Id</th>
+                <th>Recurrence End Date</th>
+                <th>Unexpected?</th>
+                <th>Recurrence End Type</th>
+                <th>Recurrence Count</th>
+                <th>Original Transaction Id</th> *@
+                <th>Tithe</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var t in FilteredAndPaginatedTransactions)
+            {
+                <tr>
+                    @* <td>@t.Id</td> *@
+                    
+                    <td>@t.Name</td>
+                    <td>@t.Description</td>
+                    <td class="fw-semibold @(t.IsIncome ? "text-success" : "text-danger")">@(t.IsIncome ? "+" : "-")@t.Amount.ToString("C", CultureInfo.GetCultureInfo(GetCultureFromCurrency(t.Wallet?.Currency)))</td>
+                    <td>@t.Date.ToShortDateString()</td>
+                    <td>@t.Wallet.Name</td>
+                    @* <td class="fw-semibold @(t.IsIncome ? "text-success" : "text-danger")">
+                        @(t.IsIncome ? "Yes" : "No")
+                    </td> *@
+                    <td>@t.Category.Name</td>
+                    <td>@(t.IsRecurring ? "Yes" : "No")</td>
+                    @* <td>@t.RecurrenceIntervalId</td>
+                    <td>@(t.RecurrenceEndDate?.ToShortDateString() ?? "-")</td>
+                    <td class="fw-semibold @(t.IsUnexpected ? "text-danger" : "text-secondary")">
+                        @(t.IsUnexpected ? "Yes" : "No")
+                    </td>
+                    <td>@t.RecurrenceEndType</td>
+                    <td>@t.RecurrenceCount</td>
+                    <td>@t.OriginalTransactionId</td> *@
+                    <td>@t.Tithe</td>
+                    <td>
+                        <button class="btn btn-sm btn-warning me-2" @onclick="() => EditTransaction(t.Id)">Edit</button>
+                        <button class="btn btn-sm btn-danger" @onclick="() => DeleteTransaction(t.Id)">Delete</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+
+    <div class="d-flex justify-content-between">
+        <button class="btn btn-secondary" @onclick="PreviousPage" disabled="@(currentPage == 1)">Previous</button>
+        <span>Page @currentPage of @totalPages</span>
+        <button class="btn btn-secondary" @onclick="NextPage" disabled="@(currentPage == totalPages)">Next</button>
+    </div>
+}
+
+
+<!-- Modal: New Transaction -->
+<div class="modal fade @(showModalTransaction ? "show d-block" : "")" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <EditForm Model="transactionForm" OnValidSubmit="SaveTransaction">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0">@transactionModalTitle - @selectedWallet?.Name</h6>
+                    <button type="button" class="btn-close" @onclick="CloseModalTransaction"></button>
+                </div>
+
+                <div class="modal-body p-3">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small">Date</label>
+                            <InputDate class="form-control form-control-sm" @bind-Value="transactionForm.Date" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Amount</label>
+                            <InputNumber class="form-control form-control-sm"
+                                         @bind-Value="transactionForm.Amount"
+                                         disabled="@(transactionForm.SubTransactions?.Any() == true)" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Name</label>
+                            <InputText class="form-control form-control-sm" @bind-Value="transactionForm.Name" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Category</label>
+                            <InputSelect class="form-select form-select-sm" @bind-Value="transactionForm.CategoryId">
+                                <option value="">-- Select Category --</option>
+                                @foreach (var c in categories)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small">Description</label>
+                            <InputText class="form-control form-control-sm" @bind-Value="transactionForm.Description" />
+                        </div>
+                        <div class="col-6">
+                            <div class="form-check small">
+                                <InputCheckbox class="form-check-input" @bind-Value="transactionForm.Tithe" id="isTitheCheck" />
+                                <label class="form-check-label ms-1" for="isTitheCheck">Tithe?</label>
+                            </div>
+                        </div>
+                        @* ... tu bloque de recurrencia aquí ... *@
+                    </div>
+
+                    <!-- SubTransactions Section -->
+                    <hr />
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">Sub Transactions</h6>
+                        <button type="button" class="btn btn-sm btn-success" @onclick="AddSubTransaction">
+                            + Add Line
+                        </button>
+                    </div>
+
+                    @if (transactionForm.SubTransactions?.Any() == true)
+                    {
+                        <table class="table table-sm table-bordered align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 30%;">Name</th>
+                                    <th style="width: 40%;">Description</th>
+                                    <th style="width: 20%;">Amount</th>
+                                    <th style="width: 10%;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var sub in transactionForm.SubTransactions)
+                                {
+                                    <tr @key="sub">
+                                        <td>
+                                            <InputText class="form-control form-control-sm"
+                                                       @bind-Value="sub.Name" />
+                                            <ValidationMessage For="@(() => sub.Name)" />
+                                        </td>
+                                        <td>
+                                            <InputText class="form-control form-control-sm"
+                                                       @bind-Value="sub.Description" />
+                                        </td>
+                                        <td class="d-flex align-items-center">
+                                            <InputNumber class="form-control form-control-sm me-1"
+                                                         @bind-Value="sub.Amount" />
+                                            <input type="checkbox" class="form-check-input"
+                                                   @onchange="e => OnSubAmountChecked(sub, e.Value as bool?)" />
+                                        </td>
+                                        <td>
+                                            <button type="button" class="btn btn-sm btn-danger"
+                                                    @onclick="() => RemoveSubTransaction(sub)">
+                                                ✕
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+
+                        </table>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(transactionValidationError))
+                {
+                    <div class="alert alert-danger py-1 px-2 small mb-2" role="alert">
+                        @transactionValidationError
+                    </div>
+                }
+
+                <div class="modal-footer py-2">
+                    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="CloseModalTransaction">Cancel</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+</div>
+
+<!-- Modal de confirmación -->
+@if (showSuccessModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0, 0, 0, 0.5);">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">Success!</h5>
+                    <button type="button" class="btn-close" @onclick="CloseSuccessModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>@message excecuted successfully.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-success" @onclick="CloseSuccessModal">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal to ask user choice on Delete -->
+@if (showOptionsModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content border-0 shadow-lg rounded-4 p-3">
+
+                <!-- Botón cerrar arriba a la derecha -->
+                <div class="d-flex justify-content-end">
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseOptionsModal"></button>
+                </div>
+
+                <!-- Título centrado -->
+                <div class="modal-body text-center pt-0">
+                    <h5 class="fw-semibold mb-4">
+                        Do you want to edit only this transaction or this and all future recurrences?
+                    </h5>
+
+                    <div class="d-flex justify-content-center gap-3">
+                        <button class="btn btn-secondary px-4" @onclick="() => ChooseOption(RecurrenceActionChoice.OnlyThis)">
+                            Only This
+                        </button>
+                        <button class="btn btn-primary px-4" @onclick="() => ChooseOption(RecurrenceActionChoice.ThisAndFuture)">
+                            This and Future
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+
+}
+
+<!-- Modal de conformación para eliminar transacción-->
+@if (showDeleteModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" @onclick="CloseModalTransaction"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure to delete the following transactions?</p>
+
+                    <ul>
+                        @foreach (var tx in transactionsToDelete)
+                        {
+                            <li>@tx.Date.ToString("yyyy-MM-dd") - @tx.Description (@tx.Amount)</li>
+                        }
+                    </ul>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDelete">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Botón flotante -->
+<div id="floatingContainer" style="position: fixed; bottom: 20px; right: 20px; display: flex; align-items: center; cursor: grab;">
+    <!-- Botón -->
+    <button class="btn btn-success rounded-circle"
+            style="width: 60px; height: 60px; font-size: 28px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+            @onclick="ShowModalTransaction">
+        +
+    </button>
+    <!-- Área de arrastre -->
+    <div id="dragHandle" style="width: 16px; height: 60px; background: rgba(0,0,0,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 5px;">
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+        </div>
+    </div>
+
+</div>
+
+
+<style>
+    .modal {
+        display: none;
+    }
+
+        .modal.show {
+            display: block;
+        }
+</style>
+
+@code {
+    // Enumerado para elegir acciones con recurrencias
+    enum RecurrenceActionChoice
+    {
+        OnlyThis,
+        ThisAndFuture
+    }
+
+    RecurrenceActionChoice? userChoice = null;
+    Transaction? transactionToEditOrDelete = null;
+    private List<Transaction> transactionsToDelete = new();
+
+    List<Transaction>? transactions;
+    List<Budget1.Models.Wallet> wallets = new();
+    List<Category> categories = new();
+    List<RecurrenceInterval> recurrenceIntervals = new();
+
+    Transaction transactionForm = new() { Date = DateTime.Today };
+    bool isEditing = false;
+    bool showModal = false;
+
+    private string? transactionValidationError;
+    private string? transactionModalTitle;
+
+    // Variables para paginación y búsqueda
+    private int currentPage = 1;
+    private int pageSize = 10;
+    private string searchTerm = string.Empty;
+
+    // Para mostrar modales específicos de recurrencia
+    bool showOptionsModal = false;
+    bool showDeleteOptionsModal = false;
+
+    // Filtrado y paginación
+    IEnumerable<Transaction> FilteredTransactions =>
+        string.IsNullOrWhiteSpace(searchTerm)
+            ? transactions ?? Enumerable.Empty<Transaction>()
+            : transactions.Where(t =>
+                (!string.IsNullOrEmpty(t.Name) && t.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(t.Description) && t.Description.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
+                t.Amount.ToString().Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                t.Date.ToShortDateString().Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (t.IsIncome ? "Income" : "Expense").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrEmpty(t.Category?.Type) && t.Category.Type.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(t.Wallet?.Name) && t.Wallet.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(t.Wallet?.Currency) && t.Wallet.Currency.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(t.Category?.Name) && t.Category.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) ||
+                (t.IsRecurring ? "Yes" : "No").Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+                (t.RecurrenceEndDate?.ToShortDateString().Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ?? false)
+            );
+
+    int filteredTotalPages => (int)Math.Ceiling((double)FilteredTransactions.Count() / pageSize);
+
+    IEnumerable<Transaction> FilteredAndPaginatedTransactions =>
+        FilteredTransactions
+            .Skip((currentPage - 1) * pageSize)
+            .Take(pageSize);
+
+    int totalPages => filteredTotalPages;
+
+    enum ActionType
+    {
+        Edit,
+        Delete,
+        None
+    }
+
+    private Wallet? selectedWallet;
+
+    private bool showModalTransaction = false;
+
+    ActionType currentAction = ActionType.None;
+
+    private bool showSuccessModal = false;
+
+    private bool showDeleteModal;
+
+    string message = string.Empty;
+
+    // Métodos para paginación
+    void PreviousPage()
+    {
+        if (currentPage > 1)
+            currentPage--;
+    }
+
+    void NextPage()
+    {
+        if (currentPage < totalPages)
+            currentPage++;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        recurrenceIntervals = await DbContext.RecurrenceIntervals.OrderBy(r => r.Id).ToListAsync();
+        await LoadTransactions();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("makeDraggableWithHandle", "floatingContainer", "dragHandle");
+        }
+    }
+
+    async Task LoadTransactions()
+    {
+        transactions = await DbContext.Transactions
+            .Include(t => t.Wallet)
+            .Include(t => t.Category)
+            .OrderBy(t => t.Date)
+            .ToListAsync();
+
+        wallets = await DbContext.Wallets.ToListAsync();
+        categories = await DbContext.Categories.ToListAsync();
+    }
+
+    void ChooseOption(RecurrenceActionChoice recurrenceActionChoice)
+    {
+        userChoice = recurrenceActionChoice;
+
+        if (currentAction == ActionType.Edit)
+        {
+            StartEdit(transactionToEditOrDelete);
+        }
+        else
+        {
+            ShowDeleteModal();
+        }
+        // if (currentAction == ActionType.Delete && recurrenceActionChoice == RecurrenceActionChoice.OnlyThis)
+        // {
+        //     ShowDeleteModal();
+        //     // DeleteTransactionSingle();
+        // }
+        // else if (currentAction == ActionType.Delete && recurrenceActionChoice == RecurrenceActionChoice.ThisAndFuture)
+        // {
+        //     ShowDeleteModal();
+        // }
+    }
+
+    private async Task SaveTransaction()
+    {
+        // if (selectedWallet == null)
+        //     return;
+
+        // Validación: Categoría válida
+        var validCategory = categories.Any(c => c.Id == transactionForm.CategoryId);
+        if (!validCategory)
+        {
+            transactionValidationError = "Please select a valid category.";
+            StateHasChanged();
+            return;
+        }
+
+        // Validaciones de recurrencia
+        if (transactionForm.IsRecurring)
+        {
+            if (!transactionForm.RecurrenceIntervalId.HasValue)
+            {
+                transactionValidationError = "Please select a recurrence interval.";
+                StateHasChanged();
+                return;
+            }
+
+            if (!transactionForm.RecurrenceEndType.HasValue)
+            {
+                transactionValidationError = "Please select a recurrence end type.";
+                StateHasChanged();
+                return;
+            }
+
+            switch (transactionForm.RecurrenceEndType)
+            {
+                case RecurrenceEndType.EndDate:
+                    if (!transactionForm.RecurrenceEndDate.HasValue)
+                    {
+                        transactionValidationError = "Please select an end date.";
+                        StateHasChanged();
+                        return;
+                    }
+                    break;
+
+                case RecurrenceEndType.NumberOfOccurrences:
+                    if (!transactionForm.RecurrenceCount.HasValue || transactionForm.RecurrenceCount <= 1)
+                    {
+                        transactionValidationError = "Please enter a valid number of repetitions (minimum 2).";
+                        StateHasChanged();
+                        return;
+                    }
+                    break;
+
+                case RecurrenceEndType.UntilFurtherNotice:
+                    break;
+            }
+        }
+
+        // Establece fechas con DateTimeKind
+        transactionForm.Date = DateTime.SpecifyKind(transactionForm.Date, DateTimeKind.Utc);
+        if (transactionForm.RecurrenceEndDate.HasValue)
+            transactionForm.RecurrenceEndDate = DateTime.SpecifyKind(transactionForm.RecurrenceEndDate.Value, DateTimeKind.Utc);
+
+        // Determina si es Income según la categoría
+        var selectedCategory = categories.FirstOrDefault(c => c.Id == transactionForm.CategoryId);
+        transactionForm.IsIncome = selectedCategory?.Type == "Income";
+
+        // Verifica si la transacción original es unexpected
+        transactionForm.IsUnexpected = await DbContext.Holds.AnyAsync(h =>
+            h.WalletId == transactionForm.WalletId &&
+            h.MonthHold.Year == transactionForm.Date.Year &&
+            h.MonthHold.Month == transactionForm.Date.Month);
+
+        if (currentAction == ActionType.Edit && userChoice == RecurrenceActionChoice.ThisAndFuture && transactionToEditOrDelete != null)
+        {
+            // Editar esta y futuras transacciones recurrentes
+
+            // Primero, actualiza la transacción original (en caso que sea modificada)
+            var originalId = transactionToEditOrDelete.OriginalTransactionId ?? transactionToEditOrDelete.Id;
+            var originalTransaction = await DbContext.Transactions.FindAsync(originalId);
+            if (originalTransaction != null)
+            {
+                // Ajustar balance para la original
+                var walletOrig = await DbContext.Wallets.FindAsync(originalTransaction.WalletId);
+                if (walletOrig != null)
+                {
+                    if (originalTransaction.IsIncome)
+                        walletOrig.Balance -= originalTransaction.Amount;
+                    else
+                        walletOrig.Balance += originalTransaction.Amount;
+
+                    if (transactionForm.IsIncome)
+                        walletOrig.Balance += transactionForm.Amount;
+                    else
+                        walletOrig.Balance -= transactionForm.Amount;
+                }
+
+                // Actualiza campos originales
+                originalTransaction.Name = transactionForm.Name;
+                originalTransaction.Description = transactionForm.Description;
+                originalTransaction.Date = transactionForm.Date;
+                originalTransaction.Amount = transactionForm.Amount;
+                originalTransaction.WalletId = transactionForm.WalletId;
+                originalTransaction.CategoryId = transactionForm.CategoryId;
+                originalTransaction.IsIncome = transactionForm.IsIncome;
+                if (transactionForm.Tithe)
+                {
+                    AddTithe(transactionForm, false);
+                }
+                originalTransaction.Tithe = transactionForm.Tithe;
+
+                await DbContext.SaveChangesAsync();
+            }
+
+
+            // Luego actualiza las transacciones futuras
+            DateTime targetDate = transactionToEditOrDelete.Date;
+            var transactionsToUpdate = await DbContext.Transactions
+                .Where(tr =>
+                    (tr.OriginalTransactionId == originalId || tr.Id == originalId) &&
+                    tr.Date >= targetDate &&
+                    tr.Id != originalId) // excluye la original porque ya la actualizamos
+                .ToListAsync();
+
+            foreach (var tr in transactionsToUpdate)
+            {
+                var wallet = await DbContext.Wallets.FindAsync(tr.WalletId);
+                if (wallet != null)
+                {
+                    // Revertir monto antiguo
+                    if (tr.IsIncome)
+                        wallet.Balance -= tr.Amount;
+                    else
+                        wallet.Balance += tr.Amount;
+
+                    // Aplicar nuevo monto
+                    if (transactionForm.IsIncome)
+                        wallet.Balance += transactionForm.Amount;
+                    else
+                        wallet.Balance -= transactionForm.Amount;
+                }
+
+                // Actualiza datos
+                tr.Name = transactionForm.Name;
+                tr.Description = transactionForm.Description;
+                tr.Amount = transactionForm.Amount;
+                tr.WalletId = transactionForm.WalletId;
+                tr.CategoryId = transactionForm.CategoryId;
+                tr.IsIncome = transactionForm.IsIncome;
+                tr.IsUnexpected = transactionForm.IsUnexpected;
+                if (transactionForm.Tithe)
+                {
+                    AddTithe(tr, false);
+                }
+                tr.Tithe = transactionForm.Tithe;
+
+                // No modificar IsRecurring ni OriginalTransactionId aquí para no romper FK
+            }
+
+            await DbContext.SaveChangesAsync();
+        }
+        else
+        {
+            // Crear o editar una sola transacción
+            if (transactionForm.Id == 0)
+            {
+                // Nueva transacción
+
+                // Primero guarda la transacción original para obtener Id
+                DbContext.Transactions.Add(transactionForm);
+
+                if (transactionForm.Tithe)
+                {
+                    AddTithe(transactionForm, false);
+                }
+
+                await DbContext.SaveChangesAsync();
+
+                // Si es recurrente, crea transacciones recurrentes usando el Id ya generado
+                if (transactionForm.IsRecurring)
+                {
+                    var interval = await DbContext.RecurrenceIntervals.FindAsync(transactionForm.RecurrenceIntervalId.Value);
+
+                    if (interval != null)
+                    {
+                        DateTime nextDate = transactionForm.Date;
+
+                        switch (transactionForm.RecurrenceEndType)
+                        {
+                            case RecurrenceEndType.EndDate:
+                                {
+                                    DateTime endDate = transactionForm.RecurrenceEndDate!.Value;
+                                    while (true)
+                                    {
+                                        nextDate = CalculateNextDate(nextDate, interval);
+                                        if (nextDate > endDate) break;
+                                        await AddRecurringTransaction(nextDate, interval, transactionForm);
+                                    }
+                                    break;
+                                }
+
+                            case RecurrenceEndType.NumberOfOccurrences:
+                                {
+                                    int repetitions = transactionForm.RecurrenceCount!.Value;
+                                    for (int i = 1; i < repetitions; i++)
+                                    {
+                                        nextDate = CalculateNextDate(nextDate, interval);
+                                        await AddRecurringTransaction(nextDate, interval, transactionForm);
+                                    }
+                                    break;
+                                }
+
+                            case RecurrenceEndType.UntilFurtherNotice:
+                                {
+                                    DateTime maxDate = nextDate.AddMonths(36);
+                                    while (true)
+                                    {
+                                        nextDate = CalculateNextDate(nextDate, interval);
+                                        if (nextDate > maxDate) break;
+                                        await AddRecurringTransaction(nextDate, interval, transactionForm);
+                                    }
+                                    break;
+                                }
+                        }
+
+                        await DbContext.SaveChangesAsync();
+                    }
+                }
+            }
+            else
+            {
+                // Editar transacción existente simple
+                var existingTransaction = await DbContext.Transactions.FindAsync(transactionForm.Id);
+                if (existingTransaction != null)
+                {
+                    var wallet = await DbContext.Wallets.FindAsync(existingTransaction.WalletId);
+                    if (wallet != null)
+                    {
+                        if (existingTransaction.IsIncome)
+                            wallet.Balance -= existingTransaction.Amount;
+                        else
+                            wallet.Balance += existingTransaction.Amount;
+
+                        if (transactionForm.IsIncome)
+                            wallet.Balance += transactionForm.Amount;
+                        else
+                            wallet.Balance -= transactionForm.Amount;
+                    }
+
+                    existingTransaction.Name = transactionForm.Name;
+                    existingTransaction.Description = transactionForm.Description;
+                    existingTransaction.Date = transactionForm.Date;
+                    existingTransaction.Amount = transactionForm.Amount;
+                    existingTransaction.WalletId = transactionForm.WalletId;
+                    existingTransaction.CategoryId = transactionForm.CategoryId;
+                    existingTransaction.IsIncome = transactionForm.IsIncome;
+                    existingTransaction.IsUnexpected = transactionForm.IsUnexpected;
+                    existingTransaction.IsRecurring = transactionForm.IsRecurring;
+                    if (existingTransaction.Tithe != transactionForm.Tithe)
+                    {
+                        if (transactionForm.Tithe)
+                        {
+                            AddTithe(transactionForm, false);
+                        }
+                        else
+                        {
+                            //Si desmarca el tithe, entonces eliminamos las transacciones de Tithe
+                            await DeleteTitheAsync(existingTransaction.Id);
+                        }
+
+                    }
+                    existingTransaction.Tithe = transactionForm.Tithe;
+
+
+                    existingTransaction.RecurrenceIntervalId = transactionForm.RecurrenceIntervalId;
+                    existingTransaction.RecurrenceEndType = transactionForm.RecurrenceEndType;
+                    existingTransaction.RecurrenceCount = transactionForm.RecurrenceCount;
+                    existingTransaction.RecurrenceEndDate = transactionForm.RecurrenceEndDate;
+                    existingTransaction.OriginalTransactionId = transactionForm.OriginalTransactionId;
+
+                    await DbContext.SaveChangesAsync();
+                }
+            }
+        }
+
+        await RecalculatePreviousBalancesAsync(transactionForm.WalletId);
+
+        CloseModalTransaction();
+        await LoadTransactions();
+        currentAction = ActionType.None;
+    }
+
+    void StartEdit(Transaction t)
+    {
+        transactionForm = new Transaction
+            {
+                Id = t.Id,
+                Name = t.Name,
+                Date = t.Date,
+                Description = t.Description,
+                Amount = t.Amount,
+                WalletId = t.WalletId,
+                CategoryId = t.CategoryId,
+                IsRecurring = t.IsRecurring,
+                RecurrenceIntervalId = t.RecurrenceIntervalId,
+                RecurrenceEndDate = t.RecurrenceEndDate,
+                OriginalTransactionId = t.OriginalTransactionId
+            };
+        isEditing = true;
+        showModalTransaction = true;
+        showOptionsModal = false;
+    }
+
+    void EditTransaction(int transactionId)
+    {
+        transactionToEditOrDelete = DbContext.Transactions
+            .Include(t => t.Category)
+            .Include(t => t.Wallet)
+            .FirstOrDefault(t => t.Id == transactionId);
+
+        selectedWallet = wallets.FirstOrDefault(w => w.Id == transactionToEditOrDelete.WalletId);
+
+        currentAction = ActionType.Edit;
+
+        if (transactionToEditOrDelete.OriginalTransactionId != null || transactionToEditOrDelete.IsRecurring)
+        {
+            showOptionsModal = true; // Mostrar modal para elegir "Solo esta" o "Esta y futuras"
+        }
+        else
+        {
+            StartEdit(transactionToEditOrDelete);
+        }
+    }
+
+    private async Task ConfirmDelete()
+    {
+        showDeleteModal = false;
+        if (userChoice == RecurrenceActionChoice.OnlyThis)
+        {
+            DeleteTransactionSingle();
+
+        }
+        else
+        {
+            DbContext.Transactions.RemoveRange(transactionsToDelete);
+            await DbContext.SaveChangesAsync();
+            CloseModalTransaction();
+            await LoadTransactions();
+            showOptionsModal = false;
+            showDeleteModal = false;
+            currentAction = ActionType.None;
+        }
+        message = "Deletion";
+        showSuccessModal = true;
+    }
+
+    void DeleteTransaction(int transactionId)
+    {
+        transactionToEditOrDelete = DbContext.Transactions
+            .Include(t => t.Category)
+            .Include(t => t.Wallet)
+            .FirstOrDefault(t => t.Id == transactionId);
+
+        selectedWallet = wallets.FirstOrDefault(w => w.Id == transactionToEditOrDelete.WalletId);
+
+        currentAction = ActionType.Delete;
+
+        if (transactionToEditOrDelete.OriginalTransactionId != null || transactionToEditOrDelete.IsRecurring)
+        {
+            showOptionsModal = true; // Mostrar opciones
+        }
+        else
+        {
+            // Eliminar única → modal simple
+            transactionsToDelete = new List<Transaction> { transactionToEditOrDelete };
+            showDeleteModal = true;
+        }
+    }
+
+    async Task DeleteTransactionSingle()
+    {
+        var id = transactionToEditOrDelete.Id;
+        var fechaOriginal = transactionToEditOrDelete.Date; // Ajusta el nombre si tu propiedad de fecha es distinta
+
+        // Buscar dependientes que apuntan a la transacción actual
+        var dependientes = await DbContext.Transactions
+            .Where(t => t.OriginalTransactionId == id)
+            .OrderBy(t => t.Date) // Orden por fecha
+            .ToListAsync();
+
+        if (dependientes.Any())
+        {
+            // Seleccionar el más cercano en fecha pero mayor que la original
+            var nuevoOriginal = dependientes
+                .Where(t => t.Date > fechaOriginal)
+                .OrderBy(t => t.Date)
+                .FirstOrDefault();
+
+            if (nuevoOriginal != null)
+            {
+                // Reasignar los OriginalTransactionId al nuevo original
+                foreach (var dep in dependientes)
+                {
+                    dep.OriginalTransactionId = nuevoOriginal.Id;
+                }
+
+                // El nuevo original deja de apuntar a otro
+                nuevoOriginal.OriginalTransactionId = null;
+            }
+            else
+            {
+                // Si no hay uno con fecha mayor, tomamos el más antiguo como fallback
+                var fallback = dependientes.First();
+                foreach (var dep in dependientes)
+                {
+                    dep.OriginalTransactionId = fallback.Id;
+                }
+                fallback.OriginalTransactionId = null;
+            }
+        }
+
+        // Eliminar la transacción original
+        DbContext.Transactions.Remove(transactionToEditOrDelete);
+
+        await DbContext.SaveChangesAsync();
+        await LoadTransactions();
+
+        showOptionsModal = false;
+        currentAction = ActionType.None;
+    }
+
+    private async Task AddRecurringTransaction(DateTime date, RecurrenceInterval interval, Transaction original)
+    {
+        var newTransaction = new Transaction
+            {
+                Name = original.Name,
+                Description = original.Description,
+                Date = date,
+                Amount = original.Amount,
+                IsIncome = original.IsIncome,
+                WalletId = original.WalletId,
+                CategoryId = original.CategoryId,
+                IsRecurring = true,
+                Tithe = original.Tithe,
+                RecurrenceIntervalId = original.RecurrenceIntervalId,
+                RecurrenceEndType = original.RecurrenceEndType,
+                RecurrenceCount = original.RecurrenceCount,
+                RecurrenceEndDate = original.RecurrenceEndDate,
+                OriginalTransactionId = original.Id,
+                IsUnexpected = await DbContext.Holds.AnyAsync(h =>
+                    h.WalletId == original.WalletId &&
+                    h.MonthHold.Year == date.Year &&
+                    h.MonthHold.Month == date.Month)
+            };
+
+        DbContext.Transactions.Add(newTransaction);
+
+        if (newTransaction.Tithe)
+        {
+            await AddTithe(newTransaction, false);
+        }
+    }
+
+    async Task ShowDeleteModal()
+    {
+        if (userChoice == RecurrenceActionChoice.OnlyThis)
+        {
+            transactionsToDelete.Add(transactionToEditOrDelete);
+        }
+        else
+        {
+
+            int originalId = transactionToEditOrDelete.OriginalTransactionId ?? transactionToEditOrDelete.Id;
+            DateTime targetDate = transactionToEditOrDelete.Date;
+
+            transactionsToDelete = await DbContext.Transactions
+                .Where(tr =>
+                    (tr.OriginalTransactionId == originalId || tr.Id == originalId) &&
+                    tr.Date >= targetDate)
+                .OrderBy(tr => tr.Date)
+                .ToListAsync();
+
+        }
+
+        showDeleteModal = true;
+        showOptionsModal = false;
+    }
+
+    private void ShowModalTransaction()
+    {
+        // if (selectedWallet == null)
+        //     return;
+
+        transactionForm = new Transaction
+            {
+                WalletId = selectedWallet.Id,
+                Date = DateTime.Today,
+                IsIncome = true,
+                IsRecurring = false,
+                RecurrenceIntervalId = null,
+                RecurrenceEndDate = null,
+                CategoryId = 0,
+                Description = string.Empty,
+                Amount = 0
+            };
+
+        showModalTransaction = true;
+    }
+
+    private void CloseModalTransaction()
+    {
+        showModalTransaction = false;
+        currentAction = ActionType.None;
+    }
+
+    private void CloseDeleteModal()
+    {
+        showDeleteModal = false;
+        showOptionsModal = false;
+    }
+
+    private void CloseOptionsModal()
+    {
+        showOptionsModal = false;
+        currentAction = ActionType.None;
+    }
+
+    private void CloseSuccessModal()
+    {
+        showSuccessModal = false;
+    }
+
+
+    private async Task AddTithe(Transaction transaction, bool saveChanges)
+    {
+        var tithe = new Tithe
+            {
+                TransactionId = transaction.Id,
+                Name = transaction.Name,
+                Amount = transaction.Amount / 10,
+                Date = transaction.Date,
+                Payed = false, // o según corresponda
+                Transaction = transaction
+            };
+
+        DbContext.Tithes.Add(tithe);
+
+        if (saveChanges)
+        {
+            await DbContext.SaveChangesAsync();
+        }
+        message = "Tithe";
+        showSuccessModal = true;
+    }
+
+    public async Task DeleteTitheAsync(int titheId)
+    {
+        var tithe = await DbContext.Tithes.FindAsync(titheId);
+        if (tithe != null)
+        {
+            DbContext.Tithes.Remove(tithe);
+            await DbContext.SaveChangesAsync();
+        }
+    }
+
+
+    private DateTime CalculateNextDate(DateTime currentDate, RecurrenceInterval interval)
+    {
+        // Si DaysInterval es mayor que cero, se usa directamente
+        if (interval.DaysInterval > 0)
+        {
+            return currentDate.AddDays(interval.DaysInterval);
+        }
+
+        // Si DaysInterval es 0, se usa el Name para calcular el próximo
+        return interval.Name switch
+        {
+            "Monthly" => currentDate.AddMonths(1),
+            "Quarterly" => currentDate.AddMonths(3),
+            "Semester" => currentDate.AddMonths(6),
+            "Yearly" => currentDate.AddYears(1),
+            _ => currentDate.AddDays(1) // Fallback por defecto si no hay coincidencia
+        };
+    }
+
+    string GetCultureFromCurrency(string? currency)
+    {
+        return currency switch
+        {
+            "USD" => "en-US",
+            "EUR" => "fr-FR",
+            "GBP" => "en-GB",
+            "BOB" => "es-BO",
+            "PEN" => "es-PE",
+            "CLP" => "es-CL",
+            "BRL" => "pt-BR",
+            _ => "en-US"
+        };
+    }
+
+    private void AddSubTransaction()
+    {
+        if (transactionForm.SubTransactions == null)
+            transactionForm.SubTransactions = new List<SubTransaction>();
+
+        var newSub = new SubTransaction();
+        transactionForm.SubTransactions.Add(newSub);
+
+        // No actualizamos el monto principal automáticamente; el usuario lo hace con el checkbox
+    }
+
+    private void RemoveSubTransaction(SubTransaction sub)
+    {
+        // Si la subtransaction estaba marcada como sumada, restamos su monto
+        if (sub.IsChecked)
+            transactionForm.Amount -= sub.Amount;
+
+        transactionForm.SubTransactions?.Remove(sub);
+    }
+
+    private void OnSubAmountChecked(SubTransaction sub, bool? isChecked)
+    {
+        sub.IsChecked = isChecked == true;
+
+        if (sub.IsChecked)
+            transactionForm.Amount += sub.Amount;
+        else
+        {
+            transactionForm.Amount -= sub.Amount;
+            if (transactionForm.Amount < 0)
+                transactionForm.Amount = 0;
+        }
+    }
+
+    public async Task RecalculatePreviousBalancesAsync(int walletId)
+    {
+        var wallet = await DbContext.Wallets.FindAsync(walletId);
+        if (wallet == null) return;
+
+        // Traemos todas las transacciones de esa cartera, ordenadas
+        var transactions = await DbContext.Transactions
+            .Where(t => t.WalletId == walletId)
+            .OrderBy(t => t.Date)
+            .ToListAsync();
+
+        // Limpiamos los previous balances existentes de esa wallet
+        var existing = DbContext.PreviousBalances.Where(pb => pb.WalletId == walletId);
+        DbContext.PreviousBalances.RemoveRange(existing);
+        await DbContext.SaveChangesAsync();
+
+        // Iniciamos balance con el saldo inicial
+        decimal runningBalance = wallet.InitialBalance;
+        // Arrancamos en el mes de creación
+        DateTime startDate = new DateTime(wallet.CreatedDate.Year, wallet.CreatedDate.Month, 1);
+
+        // Buscamos la fecha de la última transacción registrada
+        DateTime lastTransactionMonth = transactions.Any()
+            ? new DateTime(transactions.Max(t => t.Date).Year, transactions.Max(t => t.Date).Month, 1)
+            : startDate; // Si no hay transacciones, usamos la fecha de creación
+
+        // Iteramos desde la creación hasta la última transacción
+        for (var date = startDate; date <= lastTransactionMonth; date = date.AddMonths(1))
+        {
+            var monthStart = new DateTime(date.Year, date.Month, 1);
+            var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+
+            var monthTxs = transactions
+                .Where(t => t.Date >= monthStart && t.Date <= monthEnd)
+                .ToList();
+
+            runningBalance += monthTxs.Sum(t => t.IsIncome ? t.Amount : -t.Amount);
+
+            var prevBalance = new PreviousBalance
+                {
+                    WalletId = walletId,
+                    Month = monthStart,
+                    Balance = runningBalance
+                };
+
+            DbContext.PreviousBalances.Add(prevBalance);
+        }
+
+        await DbContext.SaveChangesAsync();
+    }
+
+}

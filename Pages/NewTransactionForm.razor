@@ -1,0 +1,246 @@
+﻿@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject NavigationManager NavigationManager
+@inject Budget1.Data.BudgetDbContext DbContext
+
+
+<EditForm Model="transactionForm" OnValidSubmit="SaveTransaction">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="row g-2">
+        <div class="col-6">
+            <label class="form-label small">Date</label>
+            <InputDate class="form-control form-control-sm" @bind-Value="transactionForm.Date" />
+        </div>
+        <div class="col-6">
+            <label class="form-label small">Amount</label>
+            <InputNumber class="form-control form-control-sm" @bind-Value="transactionForm.Amount" />
+        </div>
+        <div class="col-6">
+            <label class="form-label small">Name</label>
+            <InputText class="form-control form-control-sm" @bind-Value="transactionForm.Name" />
+        </div>
+        <div class="col-6">
+            <label class="form-label small">Wallet</label>
+            <InputSelect class="form-select form-select-sm" @bind-Value="transactionForm.WalletId">
+                <option value="">-- Select Wallet --</option>
+                @foreach (var w in Wallets)
+                {
+                    <option value="@w.Id">@w.Name</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="col-6">
+            <label class="form-label small">Category</label>
+            <InputSelect class="form-select form-select-sm" @bind-Value="transactionForm.CategoryId">
+                <option value="">-- Select Category --</option>
+                @foreach (var c in Categories)
+                {
+                    <option value="@c.Id">@c.Name</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="col-12">
+            <label class="form-label small">Description</label>
+            <InputText class="form-control form-control-sm" @bind-Value="transactionForm.Description" />
+        </div>
+        <div class="col-12">
+            <div class="form-check small">
+                <InputCheckbox class="form-check-input" @bind-Value="transactionForm.IsRecurring" id="isRecurringCheck" />
+                <label class="form-check-label ms-1" for="isRecurringCheck">Recurring?</label>
+            </div>
+        </div>
+        @if (transactionForm.IsRecurring)
+        {
+            <div class="col-6">
+                <label class="form-label small">Interval</label>
+                <InputSelect class="form-select form-select-sm" @bind-Value="transactionForm.RecurrenceIntervalId">
+                    <option value="">-- Interval --</option>
+                    @foreach (var interval in RecurrenceIntervals)
+                    {
+                        <option value="@interval.Id">@interval.Name</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="col-6">
+                <label class="form-label small">End Date</label>
+                <InputDate class="form-control form-control-sm" @bind-Value="transactionForm.RecurrenceEndDate" />
+            </div>
+        }
+    </div>
+
+    <div class="d-flex justify-content-end mt-3">
+        <button type="submit" class="btn btn-sm btn-primary me-2">Add</button>
+        <button type="button" class="btn btn-sm btn-secondary" @onclick="Cancel">Cancel</button>
+    </div>
+</EditForm>
+
+@code {
+    Transaction transactionForm = new() { Date = DateTime.Today };
+
+    [Parameter] public List<Wallet> Wallets { get; set; } = new();
+    [Parameter] public List<Category> Categories { get; set; } = new();
+    [Parameter] public List<RecurrenceInterval> RecurrenceIntervals { get; set; } = new();
+
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<Transaction> OnSaved { get; set; }
+
+    [Parameter] public bool isEditing { get; set; } = false;
+
+
+    // private async Task SaveTransaction()
+    // {
+    //     if (OnSaved.HasDelegate)
+    //         await OnSaved.InvokeAsync(transactionForm);
+
+    //     if (OnClose.HasDelegate)
+    //         await OnClose.InvokeAsync();
+    // }
+
+    private async Task Cancel()
+    {
+        if (OnClose.HasDelegate)
+            await OnClose.InvokeAsync();
+        else
+            NavigationManager.NavigateTo("/");
+    }
+
+    async Task SaveTransaction()
+    {
+        transactionForm.Date = DateTime.SpecifyKind(transactionForm.Date, DateTimeKind.Utc);
+        transactionForm.IsIncome = Categories.FirstOrDefault(c => c.Id == transactionForm.CategoryId)?.Type == "Income";
+
+        if (transactionForm.RecurrenceEndDate.HasValue)
+        {
+            transactionForm.RecurrenceEndDate = DateTime.SpecifyKind(transactionForm.RecurrenceEndDate.Value, DateTimeKind.Utc);
+        }
+
+        if (isEditing)
+        {
+            var existing = await DbContext.Transactions.FindAsync(transactionForm.Id);
+            if (existing != null)
+            {
+                // Verificar hold para la fecha editada
+                bool hasHold = await DbContext.Holds.AnyAsync(h =>
+                    h.WalletId == transactionForm.WalletId &&
+                    h.MonthHold.Year == transactionForm.Date.Year &&
+                    h.MonthHold.Month == transactionForm.Date.Month);
+
+                transactionForm.IsUnexpected = hasHold;
+
+                DbContext.Entry(existing).CurrentValues.SetValues(transactionForm);
+            }
+        }
+        else
+        {
+            if (transactionForm.IsRecurring && transactionForm.RecurrenceIntervalId.HasValue && transactionForm.RecurrenceEndDate.HasValue)
+            {
+                // Verificar hold para la transacción inicial
+                bool hasHoldInitial = await DbContext.Holds.AnyAsync(h =>
+                    h.WalletId == transactionForm.WalletId &&
+                    h.MonthHold.Year == transactionForm.Date.Year &&
+                    h.MonthHold.Month == transactionForm.Date.Month);
+
+                transactionForm.IsUnexpected = hasHoldInitial;
+
+                // Agrega la transacción inicial
+                DbContext.Transactions.Add(transactionForm);
+
+                // Traemos el intervalo para calcular fechas
+                var interval = await DbContext.RecurrenceIntervals.FindAsync(transactionForm.RecurrenceIntervalId.Value);
+
+                if (interval != null)
+                {
+                    DateTime nextDate = transactionForm.Date;
+                    DateTime endDate = transactionForm.RecurrenceEndDate.Value;
+
+                    while (true)
+                    {
+                        nextDate = CalculateNextDate(nextDate, interval);
+
+                        if (nextDate > endDate)
+                            break;
+
+                        // Verificar hold para cada fecha recurrente
+                        bool hasHoldRecurrent = await DbContext.Holds.AnyAsync(h =>
+                            h.WalletId == transactionForm.WalletId &&
+                            h.MonthHold.Year == nextDate.Year &&
+                            h.MonthHold.Month == nextDate.Month);
+
+                        var newTransaction = new Transaction
+                            {
+                                WalletId = transactionForm.WalletId,
+                                Name = transactionForm.Name,
+                                Description = transactionForm.Description,
+                                Amount = transactionForm.Amount,
+                                Date = nextDate,
+                                IsIncome = transactionForm.Category.Type == "Income",
+                                CategoryId = transactionForm.CategoryId,
+                                IsRecurring = true,
+                                RecurrenceIntervalId = transactionForm.RecurrenceIntervalId,
+                                RecurrenceEndDate = transactionForm.RecurrenceEndDate,
+                                IsUnexpected = hasHoldRecurrent
+                            };
+                        DbContext.Transactions.Add(newTransaction);
+                    }
+                }
+            }
+            else
+            {
+                // No recurrente, verifica hold para esta transacción
+                bool hasHold = await DbContext.Holds.AnyAsync(h =>
+                    h.WalletId == transactionForm.WalletId &&
+                    h.MonthHold.Year == transactionForm.Date.Year &&
+                    h.MonthHold.Month == transactionForm.Date.Month);
+
+                transactionForm.IsUnexpected = hasHold;
+
+                DbContext.Transactions.Add(transactionForm);
+            }
+        }
+
+        await DbContext.SaveChangesAsync();
+        if (OnSaved.HasDelegate)
+            await OnSaved.InvokeAsync(transactionForm);
+
+        if (OnClose.HasDelegate)
+            await OnClose.InvokeAsync();
+    }
+
+
+    private DateTime CalculateNextDate(DateTime currentDate, RecurrenceInterval interval)
+    {
+        switch (interval.Name)
+        {
+            case "Daily":
+                return currentDate.AddDays(interval.DaysInterval);
+
+            case "Weekly":
+                return currentDate.AddDays(7);
+
+            case "Every 2 Weeks":
+                return currentDate.AddDays(14);
+
+            case "Every 15 Days":
+                return currentDate.AddDays(15);
+
+            case "Monthly":
+                return currentDate.AddMonths(1);
+
+            case "Quarterly":
+                return currentDate.AddMonths(3);
+
+            case "Semester":
+                return currentDate.AddMonths(6);
+
+            case "Yearly":
+                return currentDate.AddYears(1);
+
+            default:
+                // Por defecto asume mensual
+                return currentDate.AddMonths(1);
+        }
+    }
+}

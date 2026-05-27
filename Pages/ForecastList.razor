@@ -1,0 +1,153 @@
+﻿@page "/forecast"
+@using System.Globalization
+@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject Budget1.Data.BudgetDbContext DbContext
+
+<PageTitle>Budget Forecast</PageTitle>
+
+<div class="max-w-5xl mx-auto p-6 dark:bg-gray-900 rounded-2xl shadow-lg mt-6">
+    <h2 class="text-center mb-6 font-bold text-3xl text-blue-700 dark:text-blue-400">
+        💰 Budget Forecast
+    </h2>
+
+    <div class="flex gap-3 mb-4 items-center justify-center">
+        <label>Año:</label>
+        <input type="number" class="border rounded px-2 py-1 w-24 text-center" @bind="SelectedYear" />
+        <label>Semestre:</label>
+        <select class="border rounded px-2 py-1" @bind="SelectedSemester">
+            <option value="1">1° (Ene - Jun)</option>
+            <option value="2">2° (Jul - Dic)</option>
+        </select>
+        <button class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700 transition" @onclick="LoadTransactions">
+            Buscar Transacciones
+        </button>
+    </div>
+
+    @if (Transactions.Any())
+    {
+        <div class="mb-6">
+            <h3 class="text-lg font-semibold mb-2 text-gray-700 dark:text-gray-200">Selecciona una transacción</h3>
+
+            <div class="flex gap-2 items-center">
+                <select class="border rounded px-3 py-2 w-72 dark:bg-gray-800 dark:text-gray-200"
+                        @bind="SelectedTransactionId">
+                    <option value="">-- Selecciona --</option>
+                    @foreach (var t in Transactions)
+                    {
+                        <option value="@t.Id">@t.Name (@t.Amount.ToString("C", CultureInfo.CurrentCulture))</option>
+                    }
+                </select>
+
+                <button class="bg-green-600 px-4 py-2 rounded hover:bg-green-700 transition"
+                        @onclick="AddSelectedTransactionToForecast"
+                        disabled="@(!SelectedTransactionId.HasValue)">
+                    Agregar a Forecast
+                </button>
+            </div>
+        </div>
+    }
+
+
+    <h3 class="text-lg font-semibold mb-3 text-gray-700 dark:text-gray-200">Tabla de Forecast</h3>
+
+    <div class="overflow-x-auto">
+        <table class="min-w-full text-sm border border-gray-300 dark:border-gray-700 rounded-lg shadow-sm">
+            <thead class="bg-blue-600 text-xs uppercase">
+                <tr>
+                    <th class="px-4 py-3 text-left">Transaction Name</th>
+                    <th class="px-3 py-3">Daily</th>
+                    <th class="px-3 py-3">Weekly</th>
+                    <th class="px-3 py-3">Monthly</th>
+                    <th class="px-3 py-3">Semester</th>
+                    <th class="px-3 py-3">Yearly</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in BudgetForecasts)
+                {
+                    <tr class="border-t hover:bg-blue-50 dark:hover:bg-gray-800 transition">
+                        <td class="px-4 py-2 font-medium text-gray-800 dark:text-gray-200">@item.TransactionName</td>
+                        <td class="px-3 py-2">@item.Daily.ToString("C", CultureInfo.CurrentCulture)</td>
+                        <td class="px-3 py-2">@item.Weekly.ToString("C", CultureInfo.CurrentCulture)</td>
+                        <td class="px-3 py-2 font-semibold text-blue-700 dark:text-blue-400">@item.Monthly.ToString("C", CultureInfo.CurrentCulture)</td>
+                        <td class="px-3 py-2">@item.Semester.ToString("C", CultureInfo.CurrentCulture)</td>
+                        <td class="px-3 py-2">@item.Yearly.ToString("C", CultureInfo.CurrentCulture)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private int SelectedYear = DateTime.Now.Year;
+    private int SelectedSemester = 1;
+
+    private int? SelectedTransactionId { get; set; }
+    private List<Transaction> Transactions = new();
+    private List<BudgetForecast> BudgetForecasts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        BudgetForecasts = await GetForecastsByYearAsync(SelectedYear);
+        Transactions = await GetTransactionsByPeriodAsync(SelectedYear, SelectedSemester);
+    }
+
+    private async Task LoadTransactions()
+    {
+        Transactions = await GetTransactionsByPeriodAsync(SelectedYear, SelectedSemester);
+    }
+
+    private async Task AddSelectedTransactionToForecast()
+    {
+        if (!SelectedTransactionId.HasValue) return;
+
+        var transaction = Transactions.FirstOrDefault(t => t.Id == SelectedTransactionId.Value);
+        if (transaction != null)
+        {
+            var forecast = new BudgetForecast
+                {
+                    Month = transaction.Date.Month,
+                    Year = transaction.Date.Year,
+                    TransactionName = transaction.Name,
+                    BaseAmount = transaction.Amount
+                };
+
+            await AddForecastAsync(forecast);
+
+            // Actualiza la lista de forecasts
+            BudgetForecasts = await GetForecastsByYearAsync(SelectedYear);
+
+            // Limpiar selección
+            SelectedTransactionId = null;
+            StateHasChanged();
+        }
+    }
+
+    public async Task AddForecastAsync(BudgetForecast forecast)
+    {
+        DbContext.BudgetForecasts.Add(forecast);
+        await DbContext.SaveChangesAsync();
+    }
+
+    // 🔹 Obtiene las transacciones por año y semestre
+    public async Task<List<Transaction>> GetTransactionsByPeriodAsync(int year, int semester)
+    {
+        var startMonth = semester == 1 ? 1 : 7;
+        var endMonth = semester == 1 ? 6 : 12;
+
+        return await DbContext.Transactions
+            .Where(t => t.Date.Year == year && t.Date.Month >= startMonth && t.Date.Month <= endMonth)
+            .OrderBy(t => t.Date)
+            .ToListAsync();
+    }
+
+    public async Task<List<BudgetForecast>> GetForecastsByYearAsync(int year)
+    {
+        return await DbContext.BudgetForecasts
+            .Where(f => f.Year == year)
+            .OrderBy(f => f.TransactionName)
+            .ToListAsync();
+    }
+}

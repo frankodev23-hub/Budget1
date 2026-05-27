@@ -1,0 +1,255 @@
+﻿@page "/tithes"
+@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject Budget1.Data.BudgetDbContext DbContext
+
+<h3>Tithes grouped by month</h3>
+
+@if (groups == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!groups.Any())
+{
+    <p>No tithes recorded.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Month / Year</th>
+                <th>Total</th>
+                <th>Paid</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var group in groups)
+            {
+                var date = new DateTime(group.Year, group.Month, 1);
+                <tr>
+                    <td>@date.ToString("MMMM yyyy")</td>
+                    <td>@group.TotalAmount.ToString("C")</td>
+                    <td>@(group.Payed ? "Yes" : "No")</td>
+                    <td>
+                        <button class="btn btn-primary btn-sm" @onclick="() => ShowDetails(group)">View</button>
+                        @if (!group.Payed)
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="() => ConfirmPay(group)">Pay</button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => ConfirmDelete(group)">Delete</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<!-- Details Modal -->
+@if (showDetailsModal && selectedGroup != null)
+{
+    var date = new DateTime(selectedGroup.Year, selectedGroup.Month, 1);
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Tithes for @date.ToString("MMMM yyyy")</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseDetails"></button>
+                </div>
+                <div class="modal-body">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Amount</th>
+                                <th>Paid</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var tithe in selectedGroup.Tithes)
+                            {
+                                <tr>
+                                    <td>@tithe.Name</td>
+                                    <td>@tithe.Amount.ToString("C")</td>
+                                    <td>@(tithe.Payed ? "Yes" : "No")</td>
+                                    <td>@tithe.Date.ToShortDateString()</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseDetails">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Confirm Pay Modal -->
+@if (showPayConfirmModal && selectedGroup != null)
+{
+    var date = new DateTime(selectedGroup.Year, selectedGroup.Month, 1);
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Payment</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CancelPay"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Do you want to mark all tithes for @date.ToString("MMMM yyyy") paid?</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelPay">Cancel</button>
+                    <button class="btn btn-success" @onclick="PayAll">Accept</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Confirm Delete Modal -->
+@if (showDeleteConfirmModal && selectedGroup != null)
+{
+    var date = new DateTime(selectedGroup.Year, selectedGroup.Month, 1);
+    <div class="modal show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CancelDelete"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Do you want to delete all tithes for @date.ToString("MMMM yyyy")? This action cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CancelDelete">Cancel</button>
+                    <button class="btn btn-danger" @onclick="DeleteAll">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+
+@code {
+    List<TitheMonthGroup> groups;
+
+    TitheMonthGroup selectedGroup;
+
+    bool showDetailsModal = false;
+    bool showPayConfirmModal = false;
+    bool showDeleteConfirmModal = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGroups();
+    }
+
+    async Task LoadGroups()
+    {
+        var allTithes = await DbContext.Tithes.ToListAsync();
+
+        if (allTithes == null || allTithes.Count == 0)
+        {
+            groups = new List<TitheMonthGroup>();
+            return;
+        }
+
+        groups = allTithes
+    .GroupBy(t => new { t.Date.Year, t.Date.Month, t.Payed })
+    .Select(g => new TitheMonthGroup
+        {
+            Year = g.Key.Year,
+            Month = g.Key.Month,
+            TotalAmount = g.Sum(t => t.Amount),
+            Payed = g.Key.Payed,
+            Tithes = g.ToList()
+        })
+    .OrderByDescending(g => g.Year)
+    .ThenByDescending(g => g.Month)
+    .ToList();
+    }
+
+
+    void ShowDetails(TitheMonthGroup group)
+    {
+        selectedGroup = group;
+        showDetailsModal = true;
+    }
+
+    void CloseDetails()
+    {
+        showDetailsModal = false;
+        selectedGroup = null;
+    }
+
+    void ConfirmPay(TitheMonthGroup group)
+    {
+        selectedGroup = group;
+        showPayConfirmModal = true;
+    }
+
+    void CancelPay()
+    {
+        showPayConfirmModal = false;
+        selectedGroup = null;
+    }
+
+    async Task PayAll()
+    {
+        if (selectedGroup == null) return;
+
+        foreach (var tithe in selectedGroup.Tithes)
+        {
+            tithe.Payed = true;
+            DbContext.Tithes.Update(tithe);
+        }
+        await DbContext.SaveChangesAsync();
+
+        showPayConfirmModal = false;
+        selectedGroup = null;
+
+        await LoadGroups();
+        StateHasChanged();
+    }
+
+    void ConfirmDelete(TitheMonthGroup group)
+    {
+        selectedGroup = group;
+        showDeleteConfirmModal = true;
+    }
+
+    void CancelDelete()
+    {
+        showDeleteConfirmModal = false;
+        selectedGroup = null;
+    }
+
+    async Task DeleteAll()
+    {
+        if (selectedGroup == null) return;
+
+        DbContext.Tithes.RemoveRange(selectedGroup.Tithes);
+        await DbContext.SaveChangesAsync();
+
+        showDeleteConfirmModal = false;
+        selectedGroup = null;
+
+        await LoadGroups();
+        StateHasChanged();
+    }
+
+    public class TitheMonthGroup
+    {
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public decimal TotalAmount { get; set; }
+        public bool Payed { get; set; }
+        public List<Tithe> Tithes { get; set; } = new();
+    }
+
+}

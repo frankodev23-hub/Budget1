@@ -1,0 +1,246 @@
+﻿@page "/categories"
+@using Microsoft.EntityFrameworkCore
+@using Budget1.Models
+@inject Budget1.Data.BudgetDbContext DbContext
+@inject IJSRuntime JS
+
+<h4 class="mb-3">Categories</h4>
+
+@if (categories == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!categories.Any())
+{
+    <p><em>No categories available yet.</em></p>
+}
+else
+{
+    <div class="d-flex flex-wrap gap-3">
+        @foreach (var c in categories)
+        {
+            <div class="card shadow-sm" style="width: 200px; min-height: 100px; border-radius: 10px;">
+                <div class="card-body p-2">
+                    @if (editCategory != null && editCategory.Id == c.Id)
+                    {
+                        <EditForm Model="editCategory" OnValidSubmit="() => UpdateCategory(c.Id)">
+                            <div class="d-flex flex-column gap-2">
+                                <InputText class="form-control form-control-sm" @bind-Value="editCategory.Name" />
+                                <InputSelect class="form-select form-select-sm" @bind-Value="editCategory.Type">
+                                    <option value="">-- Type --</option>
+                                    <option value="Expense">Expense</option>
+                                    <option value="Income">Income</option>
+                                </InputSelect>
+                                <div class="btn-group w-100 mt-1" role="group">
+                                    <button class="btn btn-sm btn-success" type="submit">✔</button>
+                                    <button class="btn btn-sm btn-secondary" type="button" @onclick="CancelEdit">✖</button>
+                                </div>
+                            </div>
+                        </EditForm>
+                    }
+                    else
+                    {
+                        <div class="mb-2" style="max-height: 40px; ">
+                            <span class="fw-semibold">@c.Name</span>
+                            <div class="text-muted small">(@c.Type)</div>
+                        </div>
+                        <div class="btn-group w-100 mt-2" role="group">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => EditCategory(c)">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteCategory(c)">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+
+@if (showModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-sm" role="document">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0">New Category</h6>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body p-3">
+                    <EditForm Model="newCategory" OnValidSubmit="AddCategory">
+                        <DataAnnotationsValidator />
+                        <ValidationSummary />
+
+                        <div class="mb-2">
+                            <label class="form-label small">Name</label>
+                            <InputText class="form-control form-control-sm" @bind-Value="newCategory.Name" />
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label small">Type</label>
+                            <InputSelect class="form-select form-select-sm" @bind-Value="newCategory.Type">
+                                <option value="">-- Select Type --</option>
+                                <option value="Income">Income</option>
+                                <option value="Expense">Expense</option>
+                            </InputSelect>
+                        </div>
+
+                        <div class="d-flex justify-content-end mt-3">
+                            <button type="submit" class="btn btn-sm btn-primary me-2">Add</button>
+                            <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseModal">Cancel</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Botón flotante -->
+<div id="floatingContainer" style="position: fixed; bottom: 20px; right: 20px; display: flex; align-items: center; cursor: grab;">
+
+    <!-- Botón -->
+    <button class="btn btn-success rounded-circle"
+            style="width: 60px; height: 60px; font-size: 28px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+            @onclick="ShowModal">
+        +
+    </button>
+    <!-- Área de arrastre -->
+    <div id="dragHandle" style="width: 16px; height: 60px; background: rgba(0,0,0,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 5px;">
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+        </div>
+    </div>
+
+    
+</div>
+
+@if (!string.IsNullOrEmpty(deleteErrorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @deleteErrorMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+
+
+<style>
+    .modal {
+        display: none;
+    }
+
+        .modal.show {
+            display: block;
+        }
+</style>
+
+
+
+
+@code {
+    List<Category>? categories;
+    Category newCategory = new();
+    Category? editCategory;
+    bool showModal = false;
+
+    string? deleteErrorMessage = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCategories();
+    }
+
+
+        protected override async Task OnAfterRenderAsync(bool firstRender)
+        {
+            if (firstRender)
+            {
+                await JS.InvokeVoidAsync("makeDraggableWithHandle", "floatingContainer", "dragHandle");
+            }
+        }
+    
+
+
+    async Task LoadCategories()
+    {
+        categories = await DbContext.Categories.ToListAsync();
+    }
+
+    async Task AddCategory()
+    {
+        // Previene tracking duplicado
+        DbContext.Entry(newCategory).State = EntityState.Detached;
+
+        newCategory.Id = 0;
+        DbContext.Categories.Add(newCategory);
+        await DbContext.SaveChangesAsync();
+
+        newCategory = new();
+        showModal = false;
+        await LoadCategories();
+    }
+
+
+    void ShowModal()
+    {
+        newCategory = new();
+        showModal = true;
+    }
+
+    void CloseModal()
+    {
+        showModal = false;
+    }
+
+    void EditCategory(Category category)
+    {
+        editCategory = new Category
+            {
+                Id = category.Id,
+                Name = category.Name,
+                Type = category.Type
+            };
+    }
+
+    async Task UpdateCategory(int id)
+    {
+        var existing = await DbContext.Categories.FindAsync(id);
+        if (existing != null && editCategory != null)
+        {
+            existing.Name = editCategory.Name;
+            existing.Type = editCategory.Type;
+            await DbContext.SaveChangesAsync();
+            editCategory = null;
+            await LoadCategories();
+        }
+    }
+
+
+    async Task DeleteCategory(Budget1.Models.Category category)
+    {
+        // Verifica si hay transacciones asociadas a la categoría
+        bool hasTransactions = await DbContext.Transactions.AnyAsync(t => t.CategoryId == category.Id);
+
+        if (hasTransactions)
+        {
+            deleteErrorMessage = "Cannot delete the category because it has associated transactions.";
+            return;
+        }
+
+        DbContext.Categories.Remove(category);
+        await DbContext.SaveChangesAsync();
+        deleteErrorMessage = null;
+        await LoadCategories();
+    }
+
+    void CancelEdit()
+    {
+        editCategory = null;
+    }
+}

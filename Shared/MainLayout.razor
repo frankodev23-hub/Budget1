@@ -1,0 +1,23 @@
+﻿@inherits LayoutComponentBase
+
+<PageTitle>Budget Planner</PageTitle>
+
+<div class="page">
+    <NavMenu OnToggle="HandleSidebarToggle" />
+
+    <div class="main-content" style="margin-left:@(collapseNavMenu ? "4.5rem" : "220px"); transition: all 0.3s; padding:1rem;">
+        @Body
+    </div>
+
+</div>
+
+
+@code {
+    private bool collapseNavMenu = false;
+
+    private void HandleSidebarToggle(bool collapsed)
+    {
+        collapseNavMenu = collapsed;
+        StateHasChanged();
+    }
+}

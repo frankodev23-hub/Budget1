@@ -1,0 +1,2760 @@
+﻿@page "/tests"
+@using BlazorBootstrap
+@using Budget1.Data
+@using Budget1.Models
+@inject Budget1.Data.BudgetDbContext DbContext
+@inject IDbContextFactory<BudgetDbContext> DbFactory
+@using Microsoft.EntityFrameworkCore
+@using System.Globalization
+@using System.Reflection
+@using System.ComponentModel.DataAnnotations
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+@using WYSIWYGTextEditor
+
+<Toasts class="p-3" Messages="messages" AutoHide="true" StackLength="3" Placement="ToastsPlacement.TopRight" />
+
+<PageTitle>Wallets</PageTitle>
+
+<h3>Wallets</h3>
+
+<div class="mb-3 d-flex align-items-end gap-2">
+    <!-- Filtro desde año -->
+    <div>
+        <label for="fromYear" class="form-label">From Year</label>
+        <InputSelect @bind-Value="FromYear" class="form-select">
+            @foreach (var year in AvailableYears)
+            {
+                <option value="@year">@year</option>
+            }
+        </InputSelect>
+    </div>
+
+    <!-- Filtro hasta año -->
+    <div>
+        <label for="toYear" class="form-label">To Year</label>
+        <InputSelect @bind-Value="ToYear" class="form-select">
+            @foreach (var year in AvailableYears)
+            {
+                <option value="@year">@year</option>
+            }
+        </InputSelect>
+    </div>
+
+    <!-- Botón aplicar filtro -->
+    <button class="btn btn-primary" @onclick="ApplyFilter">
+        Apply Filter
+    </button>
+</div>
+
+@if (FilteredYears.Any())
+{
+    <div style="width:80vw; margin:auto;">
+        <Accordion AlwaysOpen="true" class="mb-2">
+            @foreach (var year in FilteredYears)
+            {
+                <AccordionItem>
+                    <TitleTemplate>
+                        <Icon Name="IconName.Calendar2CheckFill" Class="me-1" /> @year.ToString()
+                    </TitleTemplate>
+                    <Content>
+                        <!-- Forecast -->
+                        <Accordion @ref="accordionf">
+                            <AccordionItem @onclick="() => LoadTransactionsList(year)">
+                                <TitleTemplate>
+                                    <Icon Name="IconName.CloudFill" Class="me-1" /> Forecast
+                                </TitleTemplate>
+                                <Content>
+                                    @if (Transactions.Any())
+                                    {
+                                        var transactions = Transactions.GetValueOrDefault((selectedWallet.Id, year), new List<Transaction>());
+                                        <div class="mb-6">
+                                            @*           <h3 class="text-lg font-semibold mb-2 text-gray-700 dark:text-gray-200">
+                                                Selecciona una transacción existente
+                                            </h3> *@
+
+                                            <div class="flex gap-2 items-center flex-wrap">
+                                                <select class="border rounded px-3 py-2 w-72 dark:bg-gray-800 dark:text-gray-200"
+                                                @bind="SelectedTransactionId">
+                                                    <option value="">-- Select --</option>
+                                                    @foreach (var t in transactions)
+                                                    {
+                                                        <option value="@t.Id">@t.Name (@t.Amount.ToString("C", CultureInfo.CurrentCulture))</option>
+                                                    }
+                                                </select>
+
+                                                <button class="bg-green-600 px-4 py-2 rounded hover:bg-green-700 transition"
+                                                @onclick="async () => await AddSelectedTransactionToForecast(
+                                                        transactions.FirstOrDefault(x => x.Id == SelectedTransactionId), year)"
+                                                disabled="@(!SelectedTransactionId.HasValue)">
+                                                    Add
+                                                </button>
+                                            </div>
+                                        </div>
+                                    }
+
+                                    <!-- Nueva transacción manual -->
+                                    <div class="mb-8">
+                                        @* <h3 class="text-lg font-semibold mb-2 text-gray-700 dark:text-gray-200">
+                                            O agrega una nueva transacción
+                                        </h3> *@
+
+                                        <div class="flex flex-wrap gap-2 items-center">
+                                            <input type="text"
+                                            placeholder="Forecast Name"
+                                            class="border rounded px-3 py-2 w-64 dark:bg-gray-800 dark:text-gray-200"
+                                            @bind="NewTransactionName" />
+
+                                            <input type="number"
+                                            placeholder="Amount"
+                                            step="0.01"
+                                            class="border rounded px-3 py-2 w-40 dark:bg-gray-800 dark:text-gray-200"
+                                            @bind="NewTransactionAmount" />
+
+                                            <button class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700 transition"
+                                            @onclick="async () => await AddManualTransactionToForecast(year)"
+                                            disabled="@(string.IsNullOrWhiteSpace(NewTransactionName) || NewTransactionAmount <= 0)">
+                                                Add
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    @{
+                                        // Obtiene la lista del diccionario según la wallet y año seleccionados
+                                        var forecasts = BudgetForecasts.GetValueOrDefault((selectedWallet.Id, year), new List<BudgetForecast>());
+                                    }
+
+                                    @if (forecasts.Any())
+                                    {
+                                        <div class="overflow-x-auto">
+                                            <table class="min-w-full text-sm border border-gray-300 dark:border-gray-700 rounded-lg shadow-sm">
+                                                <thead class="bg-blue-600 text-xs uppercase">
+                                                    <tr>
+                                                        <th class="px-4 py-3 text-left">Transaction Name</th>
+                                                        <th class="px-3 py-3 text-right">Daily</th>
+                                                        <th class="px-3 py-3 text-right">Weekly</th>
+                                                        <th class="px-3 py-3 text-right">Monthly</th>
+                                                        <th class="px-3 py-3 text-right">Semester</th>
+                                                        <th class="px-3 py-3 text-right">Yearly</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var item in forecasts)
+                                                    {
+                                                        <tr class="border-t hover:bg-blue-50 dark:hover:bg-gray-800 transition">
+                                                            <td class="px-4 py-2 font-medium text-gray-800 dark:text-gray-200">@item.TransactionName</td>
+                                                            <td class="px-3 py-2 text-right">@item.Daily.ToString("C", CultureInfo.CurrentCulture)</td>
+                                                            <td class="px-3 py-2 text-right">@item.Weekly.ToString("C", CultureInfo.CurrentCulture)</td>
+                                                            <td class="px-3 py-2 text-right font-semibold text-blue-700 dark:text-blue-400">@item.Monthly.ToString("C", CultureInfo.CurrentCulture)</td>
+                                                            <td class="px-3 py-2 text-right">@item.Semester.ToString("C", CultureInfo.CurrentCulture)</td>
+                                                            <td class="px-3 py-2 text-right">@item.Yearly.ToString("C", CultureInfo.CurrentCulture)</td>
+                                                        </tr>
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <p class="text-gray-600 dark:text-gray-300 mt-4">No records.</p>
+                                    }
+                                </Content>
+                            </AccordionItem>
+                        </Accordion>
+
+                        <!-- First Semester Statement -->
+                        <Accordion @ref="accordion1"
+                        OnShowing="OnShowingAsync"
+                        OnShown="OnShownAsync">
+                            @{
+                                DateTime FstartMonth = new DateTime(year, 1, 1);
+                                DateTime FendMonth = new DateTime(year, 6, 1);
+                                HideSecondAccordionItemAsync();
+                            }
+                            <AccordionItem @onclick="() => LoadTransactions(FstartMonth, FendMonth)">
+                                <TitleTemplate>
+                                    <Icon Name="IconName.OneSquareFill" Class="me-1" /> Semester
+                                </TitleTemplate>
+                                <Content>
+                                    <Spinner Class="me-3" Type="SpinnerType.Dots" Color="SpinnerColor.Primary" Visible="@visible" />
+
+
+                                    <div class="col-md-12">
+                                        @if (groupedTransactions?.Any() == true)
+                                        {
+                                            <div class="d-flex flex-wrap gap-3">
+                                                @for (var date = FstartMonth; date <= FendMonth; date = date.AddMonths(1))
+
+                                                {
+                                                    var transactions = groupedTransactions.GetValueOrDefault((selectedWallet, date), new List<Transaction>());
+                                                    var balance = cumulativeBalances.GetValueOrDefault((selectedWallet.Id, date), 0);
+                                                    var currentDate = date;
+
+                                                    Hold hasHold = holds.FirstOrDefault(h => h.WalletId == selectedWallet.Id && h.MonthHold.Year == date.Year && h.MonthHold.Month == date.Month);
+
+                                                    // Buscar balance del mes anterior en PreviousBalances
+                                                    var previousMonth = date.AddMonths(-1);
+                                                    decimal? lastMonthBalance = null;
+
+                                                    var prevRecord = previousBalances
+                                                    .FirstOrDefault(pb => pb.Month.Year == previousMonth.Year
+                                                    && pb.Month.Month == previousMonth.Month);
+
+                                                    if (prevRecord != null)
+                                                    {
+                                                        lastMonthBalance = prevRecord.Balance;
+                                                    }
+                                                    else if (selectedWallet.CreatedDate.Year == date.Year
+                                                    && selectedWallet.CreatedDate.Month == date.Month)
+                                                    {
+                                                        // Si es el mes de creación, usamos el InitialBalance
+                                                        lastMonthBalance = selectedWallet.InitialBalance;
+                                                    }
+
+                                                    var cardStyle = "width: 300px; min-height: 300px; max-height: 400px; overflow: hidden; display: flex; flex-direction: column;";
+                                                    @* var hasHold = holds?.Any(h => h.WalletId == selectedWallet.Id && h.MonthHold.Year == date.Year && h.MonthHold.Month == date.Month) == true; *@
+
+                                                    if (hasHold != null)
+                                                    {
+                                                        cardStyle += " border: 2px solid #6610f2; box-shadow: 0 0 10px rgba(102,16,242,0.4);";
+                                                    }
+                                                    else
+                                                    {
+                                                        cardStyle += " box-shadow: 0 0 5px rgba(0,0,0,0.1);";
+                                                    }
+
+                                                    <div class="wallet-card bg-light rounded-3 p-3 text-dark" style="@cardStyle">
+                                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                                            <div>
+                                                                @* <h6 class="fw-bold mb-0">@selectedWallet.Name</h6> *@
+                                                                <small class="fw-bold">@date.ToString("MMMM yyyy")</small>
+                                                            </div>
+                                                            <div class="text-end">
+                                                                @if (lastMonthBalance.HasValue)
+                                                                {
+                                                                    <small class="text-muted" style="font-size: 0.75rem;">
+                                                                        Opening Balance: @FormatAmount(@lastMonthBalance.Value, selectedWallet.Currency)
+                                                                    </small>
+                                                                    <br />
+                                                                }
+                                                            </div>
+                                                        </div>
+
+                                                        <hr class="my-2" />
+
+                                                        @if (transactions.Any())
+                                                        {
+                                                            <div>
+                                                                <table class="table no-inner-borders">
+                                                                    <thead class="text-muted">
+                                                                        <tr>
+                                                                            <td class="fw-bold" style="font-size: 0.75rem;color: black !important;">Budget Summary</td>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tfoot>
+                                                                        <tr>
+                                                                            <td class="text-success" style="font-size: 0.75rem;">Total Income</td>
+                                                                            <td class="text-end" style="font-size: 0.75rem;">
+                                                                                +
+                                                                                @FormatAmount(transactions.Where(t => t.IsIncome).Sum(t => t.Amount), selectedWallet.Currency)
+                                                                            </td>
+                                                                        </tr>
+                                                                        <tr>
+                                                                            <td class="text-danger" style="font-size: 0.75rem;">Total Expense</td>
+                                                                            <td class="text-end" style="font-size: 0.75rem;">
+                                                                                -
+                                                                                @FormatAmount(transactions.Where(t => !t.IsIncome).Sum(t => t.Amount), selectedWallet.Currency)
+                                                                            </td>
+                                                                        </tr>
+                                                                        <tr>
+                                                                            <td class="text-primary" style="font-size: 0.75rem;">Total Surplus</td>
+                                                                            <td class="text-end" style="font-size: 0.75rem;">
+                                                                                @FormatAmount(transactions.Where(t => t.IsIncome).
+                                                                                                                                      Sum(t => t.Amount) - transactions.Where(t => !t.IsIncome).Sum(t => t.Amount), selectedWallet.Currency)
+                                                                            </td>
+                                                                        </tr>
+                                                                    </tfoot>
+                                                                </table>
+                                                            </div>
+
+
+                                                            <div style="flex-grow: 1; overflow-y: auto;">
+                                                                <table class="table table-sm table-borderless mb-0">
+                                                                    <thead class="text-muted">
+                                                                        <tr>
+                                                                            <td class="fw-bold" style="font-size: 0.75rem; color: black !important;" colspan="2">
+                                                                                Spending Breakdown
+                                                                            </td>
+                                                                        </tr>
+                                                                    </thead>
+
+                                                                    <tbody>
+                                                                        @{
+                                                                            decimal sum = @lastMonthBalance.Value;
+                                                                        }
+                                                                        @foreach (var group in transactions.GroupBy(t => t.Date.Date))
+                                                                        {
+
+                                                                            var firstTransaction = group.First();
+                                                                            var remainingTransactions = group.Skip(1);
+                                                                            sum += firstTransaction.IsIncome ? firstTransaction.Amount : -firstTransaction.Amount;
+
+                                                                            <!-- Fila de la fecha con la primera transacción -->
+                                                                            <tr class="position-relative transaction-row"
+                                                                            style="background-color:@(firstTransaction.IsUnexpected ? "#e9ecef" : "transparent"); cursor:pointer;"
+                                                                            @onmousedown="() => StartLongPress(firstTransaction.Id)"
+                                                                            @onclick="() => ToggleOverlayIfSame(firstTransaction.Id)">
+
+                                                                                <td class="" style="font-size:0.75rem;">
+                                                                                    @firstTransaction.Date.ToString("ddd dd MMM", CultureInfo.InvariantCulture)
+                                                                                </td>
+
+                                                                                <td class="@((firstTransaction.IsIncome ? "text-success" : "text-danger")) text-end" style="font-size: 0.75rem;">
+                                                                                    @firstTransaction.Name | @(firstTransaction.IsIncome
+                                                               ? FormatAmount(firstTransaction.Amount, selectedWallet.Currency)
+                                                               : "-" + FormatAmount(firstTransaction.Amount, selectedWallet.Currency))
+                                                                                    <br>
+                                                                                    <span class="text-muted" style="font-size: 0.65rem;">
+                                                                                        @FormatAmount(sum, selectedWallet.Currency)
+                                                                                    </span>
+                                                                                </td>
+
+                                                                                @if (longPressTransactionId == firstTransaction.Id)
+                                                                                {
+                                                                                    <td colspan="2" class="p-0">
+                                                                                        <div class="overlay-actions d-flex justify-content-center align-items-center">
+                                                                                            <button class="btn btn-light mx-2 shadow" @onclick="() => AddTithe(firstTransaction, true)">
+                                                                                                <i class="bi bi-heart-fill fs-4 text-success"></i>
+                                                                                            </button>
+                                                                                            <button class="btn btn-light mx-2 shadow" @onclick="() => EditTransaction(firstTransaction.Id)">
+                                                                                                <i class="bi bi-pencil-square fs-4 text-primary"></i>
+                                                                                            </button>
+                                                                                            <button class="btn btn-light mx-2 shadow" @onclick="() => DeleteTransaction(firstTransaction.Id)">
+                                                                                                <i class="bi bi-trash fs-4 text-danger"></i>
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </td>
+                                                                                }
+                                                                            </tr>
+
+                                                                            <!-- Filas para el resto de transacciones de ese día -->
+                                                                            @foreach (var t in remainingTransactions)
+                                                                            {
+                                                                                sum += t.IsIncome ? t.Amount : -t.Amount;
+                                                                                <tr class="position-relative transaction-row"
+                                                                                style="background-color:@(t.IsUnexpected ? "#e9ecef" : "transparent"); cursor:pointer;"
+                                                                                @onmousedown="() => StartLongPress(t.Id)"
+                                                                                @onclick="() => ToggleOverlayIfSame(t.Id)">
+
+                                                                                    <td></td> <!-- Fecha ya mostrada en la fila anterior -->
+                                                                                    <td class="@((t.IsIncome ? "text-success" : "text-danger")) text-end" style="font-size: 0.75rem;">
+                                                                                        @t.Name | @(t.IsIncome
+                                                                ? FormatAmount(t.Amount, selectedWallet.Currency)
+                                                                : "-" + FormatAmount(t.Amount, selectedWallet.Currency))
+                                                                                        <br>
+                                                                                        <span class="text-muted" style="font-size: 0.65rem;">
+                                                                                            @FormatAmount(sum, selectedWallet.Currency)
+                                                                                        </span>
+                                                                                    </td>
+
+                                                                                    @if (longPressTransactionId == t.Id)
+                                                                                    {
+                                                                                        <td colspan="2" class="p-0">
+                                                                                            <div class="overlay-actions d-flex justify-content-center align-items-center">
+                                                                                                <button class="btn btn-light mx-2 shadow" @onclick="() => AddTithe(t, true)">
+                                                                                                    <i class="bi bi-heart-fill fs-4 text-success"></i>
+                                                                                                </button>
+                                                                                                <button class="btn btn-light mx-2 shadow" @onclick="() => EditTransaction(t.Id)">
+                                                                                                    <i class="bi bi-pencil-square fs-4 text-primary"></i>
+                                                                                                </button>
+                                                                                                <button class="btn btn-light mx-2 shadow" @onclick="() => DeleteTransaction(t.Id)">
+                                                                                                    <i class="bi bi-trash fs-4 text-danger"></i>
+                                                                                                </button>
+                                                                                            </div>
+                                                                                        </td>
+                                                                                    }
+                                                                                </tr>
+                                                                            }
+                                                                        }
+                                                                    </tbody>
+
+
+
+
+                                                                </table>
+                                                            </div>
+                                                            <table style="border-top: 2px solid #33333363;">
+                                                                <tfoot>
+                                                                    <tr>
+                                                                        @* <td class="fw-bold text-muted" style="font-size: 0.75rem;">Closing Balance</td> *@
+                                                                        <td class="fw-semibold text-end text-muted" style="font-size: 0.75rem;">
+                                                                            Closing Balance: @FormatAmount(balance, selectedWallet.Currency)
+                                                                        </td>
+                                                                    </tr>
+                                                                </tfoot>
+
+                                                            </table>
+                                                        }
+                                                        else
+                                                        {
+                                                            <div class="text-muted" style="font-size: 0.75rem; flex-grow: 1;">No transactions this month.</div>
+                                                        }
+
+
+                                                        @if (hasHold != null)
+                                                        {
+                                                            <button class="btn btn-sm mt-2 btn-hold btn-hold"
+                                                            @onclick="@(() => DeleteHold(hasHold.Id))">
+                                                                <i class="bi bi-lock me-1"></i>
+                                                                Unhold - @FormatAmount(hasHold.BalanceHold, selectedWallet.Currency)
+                                                            </button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <button class="btn btn-sm mt-2 btn-unhold"
+                                                            @onclick="@(() => SaveHold(selectedWallet.Id, currentDate, balance))">
+                                                                <i class="bi bi-lock-fill me-1"></i>
+                                                                Hold
+                                                            </button>
+                                                        }
+
+
+                                                    </div>
+
+
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <p>No data loaded. Please apply filters.</p>
+                                        }
+                                    </div>
+
+
+
+                                </Content>
+                            </AccordionItem>
+                        </Accordion>
+
+                        <!-- Second Semester Statement -->
+                        <Accordion @ref="accordion2"
+                        OnShowing="OnShowingAsync"
+                        OnShown="OnShownAsync">
+                            @{
+                                DateTime SstartMonth = new DateTime(year, 7, 1);
+                                DateTime SendMonth = new DateTime(year, 12, 1);
+                                HideFirstAccordionItemAsync();
+                            }
+                            <AccordionItem @onclick="() => LoadTransactions(SstartMonth, SendMonth)">
+                                <TitleTemplate>
+                                    <Icon Name="IconName.TwoSquareFill" Class="me-1" /> Semester
+                                </TitleTemplate>
+                                <Content>
+                                    <Spinner Class="me-3" Type="SpinnerType.Dots" Color="SpinnerColor.Primary" Visible="@visible"/>
+                                    <div class="col-md-12">
+                                        @if (groupedTransactions?.Any() == true)
+                                        {
+                                            <div class="d-flex flex-wrap gap-3">
+                                                @for (var date = SstartMonth; date <= SendMonth; date = date.AddMonths(1))
+
+                                                {
+                                                    var transactions = groupedTransactions.GetValueOrDefault((selectedWallet, date), new List<Transaction>());
+                                                    var balance = cumulativeBalances.GetValueOrDefault((selectedWallet.Id, date), 0);
+                                                    var currentDate = date;
+
+                                                    Hold hasHold = holds.FirstOrDefault(h => h.WalletId == selectedWallet.Id && h.MonthHold.Year == date.Year && h.MonthHold.Month == date.Month);
+
+                                                    // Buscar balance del mes anterior en PreviousBalances
+                                                    var previousMonth = date.AddMonths(-1);
+                                                    decimal? lastMonthBalance = null;
+
+                                                    var prevRecord = previousBalances
+                                                    .FirstOrDefault(pb => pb.Month.Year == previousMonth.Year
+                                                    && pb.Month.Month == previousMonth.Month);
+
+                                                    if (prevRecord != null)
+                                                    {
+                                                        lastMonthBalance = prevRecord.Balance;
+                                                    }
+                                                    else if (selectedWallet.CreatedDate.Year == date.Year
+                                                    && selectedWallet.CreatedDate.Month == date.Month)
+                                                    {
+                                                        // Si es el mes de creación, usamos el InitialBalance
+                                                        lastMonthBalance = selectedWallet.InitialBalance;
+                                                    }
+
+                                                    var cardStyle = "width: 300px; min-height: 300px; max-height: 400px; overflow: hidden; display: flex; flex-direction: column;";
+                                                    @* var hasHold = holds?.Any(h => h.WalletId == selectedWallet.Id && h.MonthHold.Year == date.Year && h.MonthHold.Month == date.Month) == true; *@
+
+                                                    if (hasHold != null)
+                                                    {
+                                                        cardStyle += " border: 2px solid #6610f2; box-shadow: 0 0 10px rgba(102,16,242,0.4);";
+                                                    }
+                                                    else
+                                                    {
+                                                        cardStyle += " box-shadow: 0 0 5px rgba(0,0,0,0.1);";
+                                                    }
+
+                                                    <div class="wallet-card bg-light rounded-3 p-3 text-dark" style="@cardStyle">
+                                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                                            <div>
+                                                                @* <h6 class="fw-bold mb-0">@selectedWallet.Name</h6> *@
+                                                                <small class="fw-bold">@date.ToString("MMMM yyyy")</small>
+                                                            </div>
+                                                            <div class="text-end">
+                                                                @if (lastMonthBalance.HasValue)
+                                                                {
+                                                                    <small class="text-muted" style="font-size: 0.75rem;">
+                                                                        Opening Balance: @FormatAmount(@lastMonthBalance.Value, selectedWallet.Currency)
+                                                                    </small>
+                                                                    <br />
+                                                                }
+                                                            </div>
+                                                        </div>
+
+                                                        <hr class="my-2" />
+
+                                                        @if (transactions.Any())
+                                                        {
+                                                            <div>
+                                                                <table class="table no-inner-borders">
+                                                                    <thead class="text-muted">
+                                                                        <tr>
+                                                                            <td class="fw-bold" style="font-size: 0.75rem;color: black !important;">Budget Summary</td>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tfoot>
+                                                                        <tr>
+                                                                            <td class="text-success" style="font-size: 0.75rem;">Total Income</td>
+                                                                            <td class="text-end" style="font-size: 0.75rem;">
+                                                                                +
+                                                                                @FormatAmount(transactions.Where(t => t.IsIncome).Sum(t => t.Amount), selectedWallet.Currency)
+                                                                            </td>
+                                                                        </tr>
+                                                                        <tr>
+                                                                            <td class="text-danger" style="font-size: 0.75rem;">Total Expense</td>
+                                                                            <td class="text-end" style="font-size: 0.75rem;">
+                                                                                -
+                                                                                @FormatAmount(transactions.Where(t => !t.IsIncome).Sum(t => t.Amount), selectedWallet.Currency)
+                                                                            </td>
+                                                                        </tr>
+                                                                        <tr>
+                                                                            <td class="text-primary" style="font-size: 0.75rem;">Total Surplus</td>
+                                                                            <td class="text-end" style="font-size: 0.75rem;">
+                                                                                @FormatAmount(transactions.Where(t => t.IsIncome).
+                                                                                                                                                                                                              Sum(t => t.Amount) - transactions.Where(t => !t.IsIncome).Sum(t => t.Amount), selectedWallet.Currency)
+                                                                            </td>
+                                                                        </tr>
+                                                                    </tfoot>
+                                                                </table>
+                                                            </div>
+
+
+                                                            <div style="flex-grow: 1; overflow-y: auto;">
+                                                                <table class="table table-sm table-borderless mb-0">
+                                                                    <thead class="text-muted">
+                                                                        <tr>
+                                                                            <td class="fw-bold" style="font-size: 0.75rem; color: black !important;" colspan="2">
+                                                                                Spending Breakdown
+                                                                            </td>
+                                                                        </tr>
+                                                                    </thead>
+
+                                                                    <tbody>
+                                                                        @{
+                                                                            decimal sum = @lastMonthBalance.Value;
+                                                                        }
+                                                                        @foreach (var group in transactions.GroupBy(t => t.Date.Date))
+                                                                        {
+
+                                                                            var firstTransaction = group.First();
+                                                                            var remainingTransactions = group.Skip(1);
+                                                                            sum += firstTransaction.IsIncome ? firstTransaction.Amount : -firstTransaction.Amount;
+
+                                                                            <!-- Fila de la fecha con la primera transacción -->
+                                                                            <tr class="position-relative transaction-row"
+                                                                            style="background-color:@(firstTransaction.IsUnexpected ? "#e9ecef" : "transparent"); cursor:pointer;"
+                                                                            @onmousedown="() => StartLongPress(firstTransaction.Id)"
+                                                                            @onclick="() => ToggleOverlayIfSame(firstTransaction.Id)">
+
+                                                                                <td style="font-size:0.75rem;">
+                                                                                    @firstTransaction.Date.ToString("ddd dd MMM", CultureInfo.InvariantCulture)
+                                                                                </td>
+
+                                                                                <td class="@((firstTransaction.IsIncome ? "text-success" : "text-danger")) text-end" style="font-size: 0.75rem;">
+                                                                                    @firstTransaction.Name | @(firstTransaction.IsIncome
+                                                                           ? FormatAmount(firstTransaction.Amount, selectedWallet.Currency)
+                                                                           : "-" + FormatAmount(firstTransaction.Amount, selectedWallet.Currency))
+                                                                                    <br>
+                                                                                    <span class="text-muted" style="font-size: 0.65rem;">
+                                                                                        @FormatAmount(sum, selectedWallet.Currency)
+                                                                                    </span>
+                                                                                </td>
+
+                                                                                @if (longPressTransactionId == firstTransaction.Id)
+                                                                                {
+                                                                                    <td class="p-0 position-absolute top-0 start-50 translate-middle-x" style="z-index:10;">
+                                                                                        <div class="overlay-actions d-flex justify-content-center align-items-center bg-white shadow rounded p-2">
+                                                                                            <button class="btn btn-light mx-2" @onclick="() => AddTithe(firstTransaction, true)">
+                                                                                                <i class="bi bi-heart-fill fs-4 text-success"></i>
+                                                                                            </button>
+                                                                                            <button class="btn btn-light mx-2" @onclick="() => EditTransaction(firstTransaction.Id)">
+                                                                                                <i class="bi bi-pencil-square fs-4 text-primary"></i>
+                                                                                            </button>
+                                                                                            <button class="btn btn-light mx-2" @onclick="() => DeleteTransaction(firstTransaction.Id)">
+                                                                                                <i class="bi bi-trash fs-4 text-danger"></i>
+                                                                                            </button>
+                                                                                        </div>
+                                                                                    </td>
+                                                                                }
+                                                                            </tr>
+
+
+
+                                                                            <!-- Filas para el resto de transacciones de ese día -->
+                                                                            @foreach (var t in remainingTransactions)
+                                                                            {
+                                                                                sum += t.IsIncome ? t.Amount : -t.Amount;
+                                                                                <tr class="position-relative transaction-row"
+                                                                                style="background-color:@(t.IsUnexpected ? "#e9ecef" : "transparent"); cursor:pointer;"
+                                                                                @onmousedown="() => StartLongPress(t.Id)"
+                                                                                @onclick="() => ToggleOverlayIfSame(t.Id)">
+
+                                                                                    <td></td> <!-- Fecha ya mostrada en la fila anterior -->
+                                                                                    <td class="@((t.IsIncome ? "text-success" : "text-danger")) text-end" style="font-size: 0.75rem;">
+                                                                                        @t.Name | @(t.IsIncome
+                                                                ? FormatAmount(t.Amount, selectedWallet.Currency)
+                                                                : "-" + FormatAmount(t.Amount, selectedWallet.Currency))
+                                                                                        <br>
+                                                                                        <span class="text-muted" style="font-size: 0.65rem;">
+                                                                                            @FormatAmount(sum, selectedWallet.Currency)
+                                                                                        </span>
+                                                                                    </td>
+
+                                                                                    @if (longPressTransactionId == t.Id)
+                                                                                    {
+                                                                                        <td class="p-0 position-absolute top-0 start-50 translate-middle-x" style="z-index:10;">
+                                                                                            <div class="overlay-actions d-flex justify-content-center align-items-center bg-white shadow rounded p-2">
+                                                                                                <button class="btn btn-light mx-2" @onclick="() => AddTithe(t, true)">
+                                                                                                    <i class="bi bi-heart-fill fs-4 text-success"></i>
+                                                                                                </button>
+                                                                                                <button class="btn btn-light mx-2" @onclick="() => EditTransaction(t.Id)">
+                                                                                                    <i class="bi bi-pencil-square fs-4 text-primary"></i>
+                                                                                                </button>
+                                                                                                <button class="btn btn-light mx-2" @onclick="() => DeleteTransaction(t.Id)">
+                                                                                                    <i class="bi bi-trash fs-4 text-danger"></i>
+                                                                                                </button>
+                                                                                            </div>
+                                                                                        </td>
+
+                                                                                    }
+                                                                                </tr>
+                                                                            }
+                                                                        }
+                                                                    </tbody>
+
+
+
+
+                                                                </table>
+                                                            </div>
+                                                            <table style="border-top: 2px solid #33333363;">
+
+                                                                @* <div class="text-end">
+
+                                                <small class="fw-semibold text-end @(balance >= 0 ? "text-success" : "text-danger")">
+                                                Closing Balance: @FormatAmount(balance, selectedWallet.Currency)
+                                                </small>
+                                                <br />
+
+                                        </div> *@
+
+                                                                <tfoot>
+                                                                    <tr>
+                                                                        @* <td class="fw-bold text-muted" style="font-size: 0.75rem;">Closing Balance</td> *@
+                                                                        <td class="fw-semibold text-end text-muted" style="font-size: 0.75rem;">
+                                                                            Closing Balance: @FormatAmount(balance, selectedWallet.Currency)
+                                                                        </td>
+                                                                    </tr>
+                                                                </tfoot>
+
+                                                            </table>
+                                                        }
+                                                        else
+                                                        {
+                                                            <div class="text-muted" style="font-size: 0.75rem; flex-grow: 1;">No transactions this month.</div>
+                                                        }
+
+
+                                                        @if (hasHold != null)
+                                                        {
+                                                            <button class="btn btn-sm mt-2 btn-hold btn-hold"
+                                                            @onclick="@(() => DeleteHold(hasHold.Id))">
+                                                                <i class="bi bi-lock me-1"></i>
+                                                                Unhold - @FormatAmount(hasHold.BalanceHold, selectedWallet.Currency)
+                                                            </button>
+                                                        }
+                                                        else
+                                                        {
+                                                            <button class="btn btn-sm mt-2 btn-unhold"
+                                                            @onclick="@(() => SaveHold(selectedWallet.Id, currentDate, balance))">
+                                                                <i class="bi bi-lock-fill me-1"></i>
+                                                                Hold
+                                                            </button>
+                                                        }
+
+
+                                                    </div>
+
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <p>No data loaded. Please apply filters.</p>
+                                        }
+                                    </div>
+                                </Content>
+                            </AccordionItem>
+                        </Accordion>
+                    </Content>
+                </AccordionItem>
+            }
+        </Accordion>
+    </div>
+}
+else
+{
+    <p class="text-muted">Select range.</p>
+}
+
+
+<!-- Modal: New Transaction -->
+<div class="modal fade @(showModalTransaction ? "show d-block" : "")" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <EditForm Model="transactionForm" OnValidSubmit="SaveTransaction">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0">@transactionModalTitle - @selectedWallet?.Name</h6>
+                    <button type="button" class="btn-close" @onclick="CloseModalTransaction"></button>
+                </div>
+
+                <div class="modal-body p-3">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small">Date</label>
+                            <InputDate class="form-control form-control-sm" @bind-Value="transactionForm.Date" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Amount</label>
+                            <InputNumber class="form-control form-control-sm"
+                            @bind-Value="transactionForm.Amount"
+                            disabled="@(transactionForm.SubTransactions?.Any() == true)" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Name</label>
+                            <InputText class="form-control form-control-sm" @bind-Value="transactionForm.Name" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Category</label>
+                            <InputSelect class="form-select form-select-sm" @bind-Value="transactionForm.CategoryId">
+                                <option value="">-- Select Category --</option>
+                                @foreach (var c in categories)
+                                {
+                                    <option value="@c.Id">@c.Name</option>
+                                }
+                            </InputSelect>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small">Description</label>
+                            <InputText class="form-control form-control-sm" @bind-Value="transactionForm.Description" />
+                        </div>
+                        <div class="col-6">
+                            <div class="form-check small">
+                                <InputCheckbox class="form-check-input" @bind-Value="transactionForm.Tithe" id="isTitheCheck" />
+                                <label class="form-check-label ms-1" for="isTitheCheck">Tithe?</label>
+                            </div>
+                        </div>
+                        @* ... tu bloque de recurrencia aquí ... *@
+
+                        @if (currentAction == ActionType.None || transactionForm.IsRecurring == false)
+                        {
+                            <div class="col-6">
+                                <div class="form-check small">
+                                    <InputCheckbox class="form-check-input" @bind-Value="transactionForm.IsRecurring" id="isRecurringCheck" />
+                                    <label class="form-check-label ms-1" for="isRecurringCheck">Recurring?</label>
+                                </div>
+                            </div>
+
+                            @if (transactionForm.IsRecurring)
+                            {
+                                <div class="col-6">
+                                    <label class="form-label small">Interval</label>
+                                    <InputSelect class="form-select form-select-sm" @bind-Value="transactionForm.RecurrenceIntervalId">
+                                        <option value="">-- Frequency --</option>
+                                        @foreach (var interval in recurrenceIntervals)
+                                        {
+                                            <option value="@interval.Id">@interval.Name</option>
+                                        }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => transactionForm.RecurrenceIntervalId)" />
+                                </div>
+
+                                @functions {
+        string GetEnumDisplayName(Enum value)
+        {
+                            var member = value.GetType().GetMember(value.ToString()).FirstOrDefault();
+                            return member?.GetCustomAttribute<DisplayAttribute>()?.Name ?? value.ToString();
+        }
+                        }
+
+                                <div class="col-6">
+                                    <label class="form-label small">Repeat</label>
+                                    <InputSelect class="form-select form-select-sm" @bind-Value="transactionForm.RecurrenceEndType">
+                                        <option value="">-- Select end type --</option>
+                                        @foreach (RecurrenceEndType item in Enum.GetValues(typeof(RecurrenceEndType)))
+                                        {
+                                            <option value="@item">@GetEnumDisplayName(item)</option>
+                                        }
+                                    </InputSelect>
+                                    <ValidationMessage For="@(() => transactionForm.RecurrenceEndType)" />
+                                </div>
+
+                                @if (transactionForm.RecurrenceEndType == RecurrenceEndType.EndDate)
+                                {
+                                    <div class="col-6">
+                                        <label class="form-label small">End Date</label>
+                                        <InputDate class="form-control form-control-sm" @bind-Value="transactionForm.RecurrenceEndDate" />
+                                        <ValidationMessage For="@(() => transactionForm.RecurrenceEndDate)" />
+                                    </div>
+                                }
+                                else if (transactionForm.RecurrenceEndType == RecurrenceEndType.NumberOfOccurrences)
+                                {
+                                    <div class="col-6">
+                                        <label class="form-label small">Number of Repetitions</label>
+                                        <InputNumber class="form-control form-control-sm" @bind-Value="transactionForm.RecurrenceCount" />
+                                        <ValidationMessage For="@(() => transactionForm.RecurrenceCount)" />
+                                    </div>
+                                }
+                            }
+                        }
+                    </div>
+
+                    <!-- SubTransactions Section -->
+                    <hr />
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">Sub Transactions</h6>
+                        <button type="button" class="btn btn-sm btn-success" @onclick="AddSubTransaction">
+                            + Add Line
+                        </button>
+                    </div>
+
+                    @if (transactionForm.SubTransactions?.Any() == true)
+                    {
+                        <table class="table table-sm table-bordered align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 30%;">Name</th>
+                                    <th style="width: 40%;">Description</th>
+                                    <th style="width: 20%;">Amount</th>
+                                    <th style="width: 10%;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var sub in transactionForm.SubTransactions)
+                                {
+                                    <tr @key="sub">
+                                        <td>
+                                            <InputText class="form-control form-control-sm"
+                                            @bind-Value="sub.Name" />
+                                            <ValidationMessage For="@(() => sub.Name)" />
+                                        </td>
+                                        <td>
+                                            <InputText class="form-control form-control-sm"
+                                            @bind-Value="sub.Description" />
+                                        </td>
+                                        <td class="d-flex align-items-center">
+                                            <InputNumber class="form-control form-control-sm me-1"
+                                            @bind-Value="sub.Amount" />
+                                            <input type="checkbox" class="form-check-input"
+                                            @onchange="e => OnSubAmountChecked(sub, e.Value as bool?)" />
+                                        </td>
+                                        <td>
+                                            <button type="button" class="btn btn-sm btn-danger"
+                                            @onclick="() => RemoveSubTransaction(sub)">
+                                                ✕
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+
+                        </table>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(transactionValidationError))
+                {
+                    <div class="alert alert-danger py-1 px-2 small mb-2" role="alert">
+                        @transactionValidationError
+                    </div>
+                }
+
+                <div class="modal-footer py-2">
+                    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="CloseModalTransaction">Cancel</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+</div>
+
+@if (showModalQuickNote)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0">Quick Note</h6>
+                    <button type="button" class="btn-close" @onclick="CloseModalQuickNote"></button>
+                </div>
+
+                <div class="modal-body p-3">
+                    <TextEditor Toolbar="new Toolbar { ShowFullToolbar=true }"
+                    EditorContainerId="QuickNoteEditor"
+                    @ref="MyEditor"
+                    Placeholder="Escribe aquí...">
+                    </TextEditor>
+
+                    <button class="btn btn-primary mt-2"
+                    @onclick="SaveNote"
+                    disabled="@(!_editorInitialized)">
+                        Save Note
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+
+
+<!-- Modal to ask user choice on Delete -->
+@if (showOptionsModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content border-0 shadow-lg rounded-4 p-3">
+
+                <!-- Botón cerrar arriba a la derecha -->
+                <div class="d-flex justify-content-end">
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseOptionsModal"></button>
+                </div>
+
+                <!-- Título centrado -->
+                <div class="modal-body text-center pt-0">
+                    <h5 class="fw-semibold mb-4">
+                        Do you want to edit only this transaction or this and all future recurrences?
+                    </h5>
+
+                    <div class="d-flex justify-content-center gap-3">
+                        <button class="btn btn-secondary px-4" @onclick="() => ChooseOption(RecurrenceActionChoice.OnlyThis)">
+                            Only This
+                        </button>
+                        <button class="btn btn-primary px-4" @onclick="() => ChooseOption(RecurrenceActionChoice.ThisAndFuture)">
+                            This and Future
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+
+}
+
+<!-- Modal de confirmación -->
+@if (showSuccessModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0, 0, 0, 0.5);">
+        <div class="modal-dialog modal-sm">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">Success!</h5>
+                    <button type="button" class="btn-close" @onclick="CloseSuccessModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>@message excecuted successfully.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-success" @onclick="CloseSuccessModal">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal de conformación para eliminar transacción-->
+@if (showDeleteModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" role="dialog">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Deletion</h5>
+                    <button type="button" class="btn-close" @onclick="CloseDeleteModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure to delete the following transactions?</p>
+
+                    <ul>
+                        @foreach (var tx in transactionsToDelete)
+                        {
+                            <li>@tx.Date.ToString("yyyy-MM-dd") - @tx.Description (@FormatAmount(@tx.Amount, selectedWallet.Currency))</li>
+                        }
+                    </ul>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseDeleteModal">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ConfirmDelete">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Botón flotante Transactions -->
+<div style="position: fixed; bottom: 20px; right: 20px; display: flex; align-items: center; cursor: grab;">
+    <button class="btn btn-success rounded-circle"
+    style="width: 60px; height: 60px; font-size: 28px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+    @onclick="ShowModalTransaction">
+        <Icon Name="IconName.CurrencyPound" Class="mb-1" /> @* Ícono de más *@
+    </button>
+
+    <!-- Área de arrastre -->
+    <div style="width: 16px; height: 60px; background: rgba(0,0,0,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 5px;">
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+        </div>
+    </div>
+</div>
+
+<!-- Botón flotante Notes -->
+<div style="position: fixed; bottom: 100px; right: 20px; display: flex; align-items: center; cursor: grab;">
+    <button class="btn btn-warning rounded-circle"
+    style="width: 60px; height: 60px; font-size: 28px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+    @onclick="OpenModalQuickNote">
+        <Icon Name="IconName.FileEarmarkMedical" Class="mb-1" Color="IconColor.White" />
+    </button>
+
+
+
+    <!-- Área de arrastre -->
+    <div style="width: 16px; height: 60px; background: rgba(0,0,0,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 5px;">
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+        </div>
+    </div>
+</div>
+
+
+
+<style>
+    .modal {
+    display: none;
+    }
+
+    .modal.show {
+    display: block;
+    }
+
+    .unexpected-row {
+    background-color: #e9ecef; /* gris claro similar a bg-light, pero un poco más suave */
+    }
+
+    .overlay-actions {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.6);
+    animation: fadeIn 0.2s ease-in-out;
+    z-index: 10;
+    }
+
+    @@keyframes fadeIn {
+    from {
+    opacity: 0;
+    }
+
+
+    to {
+    opacity: 1;
+    }
+    }
+
+    .transaction-row {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .transaction-row:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    z-index: 5;
+    position: relative;
+    }
+
+    .table.no-inner-borders {
+    border-collapse: collapse;
+    border-spacing: 0; /* Quita espacio entre celdas */
+    @* border-top: 2px solid #33333363; /* Línea superior más gruesa y oscura */ *@
+    border-bottom: 2px solid #33333363; /* Línea inferior más gruesa y oscura */
+    }
+
+    .table.no-inner-borders td,
+    .table.no-inner-borders th {
+    border: none !important;
+    padding-top: 2px; /* Muy compacto */
+    padding-bottom: 2px;
+    font-size: 0.75rem; /* Mantiene tamaño pequeño */
+    }
+
+    .btn-unhold {
+    background-color: transparent;
+    border-color: #ced4da;
+    color: #6f42c1;
+    }
+
+    .btn-unhold:hover {
+    background-color: #6f42c1;
+    border-color: #6f42c1;
+    color: #ffffff;
+    }
+
+    .btn-hold {
+    background-color: #6f42c1;
+    border-color: #6f42c1;
+    color: #ffffff;
+    }
+
+    .btn-hold:hover {
+    background-color: transparent;
+    border-color: #ced4da;
+    color: #6f42c1;
+    }
+
+</style>
+
+
+@code {
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "walletId")]
+    public int? SelectedWalletIdFromQuery { get; set; }
+
+    private bool visible = true;
+
+    private Note note = new();
+    private TextEditor? MyEditor = new();
+
+    TextEditor QuillHtml;
+
+    [Parameter]
+    public string? InitialContent { get; set; }
+
+
+    List<ToastMessage> messages = new List<ToastMessage>();
+
+    private void ShowMessageSucccess(ToastType toastType) => messages.Add(CreateToastMessageSuccess(toastType));
+    private void ShowMessageDanger(ToastType toastType) => messages.Add(CreateToastMessageDanger(toastType));
+
+    private ToastMessage CreateToastMessageSuccess(ToastType toastType)
+    => new ToastMessage
+        {
+            Type = toastType,
+            Title = "Success",
+            Message = "Note Saved",
+        };
+    private ToastMessage CreateToastMessageDanger(ToastType toastType)
+    => new ToastMessage
+        {
+            Type = toastType,
+            Title = "Blazor Bootstrap",
+            Message = "Error saving note",
+        };
+
+    private int FromYear { get; set; } = DateTime.Now.Year;
+    private int ToYear { get; set; } = DateTime.Now.Year;
+    private List<int> AvailableYears { get; set; } = new();
+    private List<int> FilteredYears { get; set; } = new();
+
+
+    private bool showModalQuickNote = false;
+    private bool showNewNoteForm = false;
+    private bool showNoteList = true;
+    private bool isEditorReady = false;
+
+    private string activeTab = "notes";
+
+    private QuickNote quickNoteForm = new QuickNote();
+    private QuickNoteCategory quickNoteCategoryForm = new QuickNoteCategory();
+
+    private List<QuickNote> quickNotes = new();
+    private List<QuickNoteCategory> noteCategories = new();
+
+    private bool showButtonAddNoteList = true;
+    private bool showCategoryNoteList = true;
+    private bool showNewCategoryNoteForm = false;
+    private bool showButtonAddCategoryNote = true;
+
+    private Accordion accordionf = default!;
+    private async Task HideForecastAccordionItemAsync()
+    {
+        Console.WriteLine("Hiding Forecast Accordion Item");
+        await accordionf.HideAccordionItemByNameAsync("bi-cloud-fill");
+    }
+    private Accordion accordion1 = default!;
+    private async Task HideFirstAccordionItemAsync() => await accordion1.HideAccordionItemByNameAsync("bi-1-square-fill");
+    private Accordion accordion2 = default!;
+    private async Task HideSecondAccordionItemAsync() => await accordion2.HideAccordionItemByNameAsync("bi-2-square-fill");
+
+
+    // Enumerado para elegir acciones con recurrencias
+    enum RecurrenceActionChoice
+    {
+        OnlyThis,
+        ThisAndFuture
+    }
+
+    RecurrenceActionChoice? userChoice = null;
+    Transaction? transactionToEditOrDelete = null;
+
+    private Wallet? selectedWallet;
+
+    private Dictionary<(Wallet Wallet, DateTime Month), List<Transaction>> groupedTransactions = new();
+    private Dictionary<(int WalletId, DateTime Month), decimal> cumulativeBalances = new();
+    private Dictionary<(int WalletId, int Year), List<Transaction>> Transactions = new();
+    private Dictionary<(int WalletId, int Year), List<BudgetForecast>> BudgetForecasts = new();
+
+    private int? SelectedTransactionId { get; set; }
+    private string? NewTransactionName { get; set; }
+    private decimal NewTransactionAmount { get; set; }
+
+    private List<Wallet> wallets = new();
+    private List<Transaction> filteredTransactions = new();
+
+    private int? selectedWalletId;
+    private DateTime? startMonth;
+    private DateTime? endMonth;
+
+    private bool _isLoading = false;
+    private bool showModalTransaction = false;
+
+    private bool showDeleteModal;
+    private List<Transaction> transactionsToDelete = new();
+
+    private List<Category> categories = new();
+    private List<RecurrenceInterval> recurrenceIntervals = new();
+    private List<Hold> holds = new();
+
+    private Transaction transactionForm = new();
+    bool isEditing = false;
+
+    private bool hasLoadedInitially = false;
+
+    private bool showSuccessModal = false;
+
+    private string? transactionValidationError;
+    private string? transactionModalTitle;
+
+    bool showOptionsModal = false;
+
+    private bool listenersAdded;
+
+    private bool longPressTriggered = false;
+    private int? longPressTransactionId = null;
+    private System.Timers.Timer longPressTimer;
+
+    private List<SummaryColumn> summaryColumns = new List<SummaryColumn>();
+
+    enum ActionType
+    {
+        Edit,
+        Delete,
+        None
+    }
+
+    ActionType currentAction = ActionType.None;
+
+    string message = string.Empty;
+
+    private List<PreviousBalance> previousBalances;
+
+    protected override void OnInitialized()
+    {
+        var currentYear = DateTime.Now.Year;
+        AvailableYears = Enumerable.Range(currentYear - 5, 11).ToList();
+        ToYear = currentYear+1;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (SelectedWalletIdFromQuery.HasValue)
+        {
+            selectedWalletId = SelectedWalletIdFromQuery;
+        }
+        else
+        {
+            selectedWalletId = null;
+        }
+
+        await LoadData();
+
+        if (!hasLoadedInitially)
+        {
+            // if (selectedWallet != null) await LoadTransactions();
+            hasLoadedInitially = true;
+        }
+    }
+    private bool _editorInitialized = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Código JS que quieres ejecutar solo la primera vez
+        if (firstRender)
+        {
+            var dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("addLongPressListeners", dotNetRef);
+            await Task.Delay(50);
+            await JS.InvokeVoidAsync("makeDraggableWithHandle", "floatingContainer", "dragHandle");
+        }
+
+        // Inicializar editor si modal está abierto y no se había inicializado
+        if (showModalQuickNote && MyEditor is not null && !_editorInitialized)
+        {
+            _editorInitialized = true;
+            await Task.Yield(); // Asegura que el editor está en el DOM
+
+            var content = note?.Content ?? "<p>Initial content...</p>";
+            await MyEditor.LoadHTMLContent(content); // Carga seguro con JSInterop
+        }
+    }
+
+    private async Task LoadData()
+    {
+        using var context = DbFactory.CreateDbContext();
+
+        wallets = await context.Wallets
+            .OrderByDescending(w => w.CreatedDate)
+            .ToListAsync();
+
+        categories = await context.Categories.ToListAsync();
+
+        quickNotes = await context.QuickNotes
+            .Include(q => q.Items)
+            .Include(q => q.Category)
+            .OrderByDescending(q => q.Date)
+            .ToListAsync();
+
+        noteCategories = await context.QuickNoteCategories.ToListAsync();
+
+        recurrenceIntervals = await context.RecurrenceIntervals
+            .OrderBy(i => i.Name)
+            .ToListAsync();
+
+        holds = await context.Holds.ToListAsync();
+
+        note = await context.Notes.FirstOrDefaultAsync();
+
+        // ─────────────────────────────────────
+        // Wallet seleccionada
+        // ─────────────────────────────────────
+
+        if (!selectedWalletId.HasValue)
+        {
+            selectedWallet = null;
+            groupedTransactions.Clear();
+            cumulativeBalances.Clear();
+            return;
+        }
+
+        selectedWallet = wallets.FirstOrDefault(w => w.Id == selectedWalletId.Value);
+
+        if (selectedWallet == null)
+        {
+            groupedTransactions.Clear();
+            cumulativeBalances.Clear();
+            return;
+        }
+
+        // Recalcular balances previos (usa SU propio DbContext)
+        await RecalculatePreviousBalancesAsync(selectedWallet.Id);
+
+        // Cargar PreviousBalances con ESTE contexto
+        previousBalances = await context.PreviousBalances
+            .Where(pb => pb.WalletId == selectedWallet.Id)
+            .ToListAsync();
+
+        // ─────────────────────────────────────
+        // Fechas
+        // ─────────────────────────────────────
+
+        var today = DateTime.Today;
+
+        if (selectedWallet.CreatedDate != DateTime.MinValue)
+        {
+            startMonth ??= new DateTime(
+                selectedWallet.CreatedDate.Year,
+                selectedWallet.CreatedDate.Month,
+                1);
+        }
+        else
+        {
+            startMonth ??= new DateTime(today.Year, today.Month, 1);
+        }
+
+        endMonth ??= new DateTime(today.Year, today.Month, 1);
+
+        // Aplicar filtros finales
+        await ApplyFilter();
+    }
+
+
+    private async Task ApplyFilter()
+    {
+        if (FromYear <= ToYear)
+        {
+            FilteredYears = Enumerable.Range(FromYear, ToYear - FromYear + 1).ToList();
+        }
+        else
+        {
+            FilteredYears.Clear();
+        }
+
+
+        StateHasChanged();
+    }
+
+    private void OnShowingAsync(AccordionEventArgs args)
+    {
+        visible = true;
+    }
+
+    private void OnShownAsync(AccordionEventArgs args)
+    {
+        visible = false;
+    }
+
+    private async Task LoadTransactionsList(int year)
+    {
+        if (_isLoading) return;
+        _isLoading = true;
+
+        try
+        {
+            using var db = await DbFactory.CreateDbContextAsync();
+
+            var result = await db.Transactions
+                .Where(t => t.WalletId == selectedWallet.Id && t.Date.Year == year)
+                .OrderBy(t => t.Date)
+                .ToListAsync();
+
+            Transactions[(selectedWallet.Id, year)] = result;
+
+            // También carga los pronósticos del año
+            var forecasts = await GetForecastsByYearAsync(year);
+            BudgetForecasts[(selectedWallet.Id, year)] = forecasts;
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    // ============================================================
+    // Agregar transacción manual al pronóstico
+    // ============================================================
+    private async Task AddManualTransactionToForecast(int year)
+    {
+        if (string.IsNullOrWhiteSpace(NewTransactionName) || NewTransactionAmount <= 0)
+            return;
+
+        var forecast = new BudgetForecast
+            {
+                WalletId = selectedWallet.Id,
+                Year = year,
+                Month = DateTime.Now.Month,
+                TransactionName = NewTransactionName.Trim(),
+                BaseAmount = NewTransactionAmount
+            };
+
+        await AddForecastAsync(forecast);
+
+        // Actualiza la lista del diccionario
+        var budgetForecasts = await GetForecastsByYearAsync(year);
+        BudgetForecasts[(selectedWallet.Id, year)] = budgetForecasts;
+
+        // Limpia los campos
+        NewTransactionName = string.Empty;
+        NewTransactionAmount = 0;
+        StateHasChanged();
+
+        await LoadTransactionsList(year);
+    }
+
+    // ============================================================
+    // Agregar una transacción existente al pronóstico
+    // ============================================================
+    private async Task AddSelectedTransactionToForecast(Transaction transaction, int year)
+    {
+        if (!SelectedTransactionId.HasValue || transaction == null) return;
+
+        var forecast = new BudgetForecast
+            {
+                WalletId = selectedWallet.Id,
+                Month = transaction.Date.Month,
+                Year = transaction.Date.Year,
+                TransactionName = transaction.Name,
+                BaseAmount = transaction.Amount
+            };
+
+        await AddForecastAsync(forecast);
+
+        // Actualiza la lista de forecasts
+        var budgetForecasts = await GetForecastsByYearAsync(year);
+        BudgetForecasts[(selectedWallet.Id, year)] = budgetForecasts;
+
+        // Limpiar selección
+        SelectedTransactionId = null;
+        StateHasChanged();
+
+        await LoadTransactionsList(year);
+    }
+
+    // ============================================================
+    // Guardar un nuevo pronóstico en la base de datos
+    // ============================================================
+    public async Task AddForecastAsync(BudgetForecast forecast)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        db.BudgetForecasts.Add(forecast);
+        await db.SaveChangesAsync();
+    }
+
+    // ============================================================
+    // Obtener todos los pronósticos por año
+    // ============================================================
+    public async Task<List<BudgetForecast>> GetForecastsByYearAsync(int year)
+    {
+        using var db = await DbFactory.CreateDbContextAsync();
+        return await db.BudgetForecasts
+            .Where(f => f.WalletId == selectedWallet.Id && f.Year == year)
+            .OrderBy(f => f.TransactionName)
+            .ToListAsync();
+    }
+
+    private async Task LoadTransactions(DateTime? startMonth, DateTime? endMonth)
+    {
+        if (_isLoading) return;
+        _isLoading = true;
+
+        try
+        {
+            var query = DbContext.Transactions
+                .Include(t => t.Category)
+                .Include(t => t.Wallet)
+                .AsQueryable();
+
+            if (selectedWalletId.HasValue)
+                query = query.Where(t => t.WalletId == selectedWalletId.Value);
+
+            DateTime globalStartDate = new DateTime(startMonth!.Value.Year, startMonth.Value.Month, 1);
+            DateTime globalEndDate = new DateTime(endMonth!.Value.Year, endMonth.Value.Month, 1).AddMonths(1).AddDays(-1);
+
+            query = query.Where(t => t.Date <= globalEndDate);
+
+            var allTransactions = await query.OrderBy(t => t.Date).ToListAsync();
+
+            // ❌ Quitamos el Clear()
+            // groupedTransactions.Clear();
+            // cumulativeBalances.Clear();
+
+            var prevBalance = await DbContext.PreviousBalances
+                .Where(pb => pb.WalletId == selectedWallet.Id && pb.Month < globalStartDate)
+                .OrderByDescending(pb => pb.Month)
+                .FirstOrDefaultAsync();
+
+            decimal previousBalance = prevBalance?.Balance ?? selectedWallet.InitialBalance;
+
+            for (var date = globalStartDate; date <= globalEndDate; date = date.AddMonths(1))
+            {
+                var monthStart = new DateTime(date.Year, date.Month, 1);
+                var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+
+                var monthTxs = allTransactions
+                    .Where(t => t.Date >= monthStart && t.Date <= monthEnd)
+                    .ToList();
+
+                var currentMonthBalance = monthTxs.Sum(t => t.IsIncome ? t.Amount : -t.Amount);
+                previousBalance += currentMonthBalance;
+
+                if (monthTxs.Any() || previousBalance != 0)
+                {
+                    // ✅ En vez de reemplazar todo, insertamos/actualizamos mes por mes
+                    groupedTransactions[(selectedWallet, monthStart)] = monthTxs;
+                    cumulativeBalances[(selectedWallet.Id, monthStart)] = previousBalance;
+                }
+            }
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+
+    void ChooseOption(RecurrenceActionChoice recurrenceActionChoice)
+    {
+        userChoice = recurrenceActionChoice;
+
+        if (currentAction == ActionType.Edit)
+        {
+            StartEdit(transactionToEditOrDelete);
+        }
+        else
+        {
+            ShowDeleteModal();
+        }
+
+    }
+
+    private async Task SaveTransaction()
+    {
+        if (selectedWallet == null)
+            return;
+
+        // Validación: Categoría válida
+        var validCategory = categories.Any(c => c.Id == transactionForm.CategoryId);
+        if (!validCategory)
+        {
+            transactionValidationError = "Please select a valid category.";
+            StateHasChanged();
+            return;
+        }
+
+        // Validaciones de recurrencia
+        if (transactionForm.IsRecurring)
+        {
+            if (!transactionForm.RecurrenceIntervalId.HasValue)
+            {
+                transactionValidationError = "Please select a recurrence interval.";
+                StateHasChanged();
+                return;
+            }
+
+            if (!transactionForm.RecurrenceEndType.HasValue)
+            {
+                transactionValidationError = "Please select a recurrence end type.";
+                StateHasChanged();
+                return;
+            }
+
+            switch (transactionForm.RecurrenceEndType)
+            {
+                case RecurrenceEndType.EndDate:
+                    if (!transactionForm.RecurrenceEndDate.HasValue)
+                    {
+                        transactionValidationError = "Please select an end date.";
+                        StateHasChanged();
+                        return;
+                    }
+                    break;
+
+                case RecurrenceEndType.NumberOfOccurrences:
+                    if (!transactionForm.RecurrenceCount.HasValue || transactionForm.RecurrenceCount <= 1)
+                    {
+                        transactionValidationError = "Please enter a valid number of repetitions (minimum 2).";
+                        StateHasChanged();
+                        return;
+                    }
+                    break;
+
+                case RecurrenceEndType.UntilFurtherNotice:
+                    break;
+            }
+        }
+
+        // Establece fechas con DateTimeKind
+        transactionForm.Date = DateTime.SpecifyKind(transactionForm.Date, DateTimeKind.Utc);
+        if (transactionForm.RecurrenceEndDate.HasValue)
+            transactionForm.RecurrenceEndDate = DateTime.SpecifyKind(transactionForm.RecurrenceEndDate.Value, DateTimeKind.Utc);
+
+        // Determina si es Income según la categoría
+        var selectedCategory = categories.FirstOrDefault(c => c.Id == transactionForm.CategoryId);
+        transactionForm.IsIncome = selectedCategory?.Type == "Income";
+
+        // Verifica si la transacción original es unexpected
+        transactionForm.IsUnexpected = await DbContext.Holds.AnyAsync(h =>
+            h.WalletId == transactionForm.WalletId &&
+            h.MonthHold.Year == transactionForm.Date.Year &&
+            h.MonthHold.Month == transactionForm.Date.Month);
+
+        if (currentAction == ActionType.Edit && userChoice == RecurrenceActionChoice.ThisAndFuture && transactionToEditOrDelete != null)
+        {
+            // Editar esta y futuras transacciones recurrentes
+
+            // Primero, actualiza la transacción original (en caso que sea modificada)
+            var originalId = transactionToEditOrDelete.OriginalTransactionId ?? transactionToEditOrDelete.Id;
+            var originalTransaction = await DbContext.Transactions.FindAsync(originalId);
+            if (originalTransaction != null)
+            {
+                // Ajustar balance para la original
+                var walletOrig = await DbContext.Wallets.FindAsync(originalTransaction.WalletId);
+                if (walletOrig != null)
+                {
+                    if (originalTransaction.IsIncome)
+                        walletOrig.Balance -= originalTransaction.Amount;
+                    else
+                        walletOrig.Balance += originalTransaction.Amount;
+
+                    if (transactionForm.IsIncome)
+                        walletOrig.Balance += transactionForm.Amount;
+                    else
+                        walletOrig.Balance -= transactionForm.Amount;
+                }
+
+                if (originalId == transactionToEditOrDelete.Id)
+                {
+                    // Actualiza campos originales
+                    originalTransaction.Name = transactionForm.Name;
+                    originalTransaction.Description = transactionForm.Description;
+                    originalTransaction.Date = transactionForm.Date;
+                    originalTransaction.Amount = transactionForm.Amount;
+                    originalTransaction.WalletId = transactionForm.WalletId;
+                    originalTransaction.CategoryId = transactionForm.CategoryId;
+                    originalTransaction.IsIncome = transactionForm.IsIncome;
+                    if (transactionForm.Tithe)
+                    {
+                        AddTithe(transactionForm, false);
+                    }
+                    originalTransaction.Tithe = transactionForm.Tithe;
+
+                    await DbContext.SaveChangesAsync();
+                }
+
+
+            }
+
+
+            // Luego actualiza las transacciones futuras
+            DateTime targetDate = transactionToEditOrDelete.Date;
+            var transactionsToUpdate = await DbContext.Transactions
+                .Where(tr =>
+                    (tr.OriginalTransactionId == originalId || tr.Id == originalId) &&
+                    tr.Date >= targetDate &&
+                    tr.Id != originalId) // excluye la original porque ya la actualizamos
+                .ToListAsync();
+
+            foreach (var tr in transactionsToUpdate)
+            {
+                var wallet = await DbContext.Wallets.FindAsync(tr.WalletId);
+                if (wallet != null)
+                {
+                    // Revertir monto antiguo
+                    if (tr.IsIncome)
+                        wallet.Balance -= tr.Amount;
+                    else
+                        wallet.Balance += tr.Amount;
+
+                    // Aplicar nuevo monto
+                    if (transactionForm.IsIncome)
+                        wallet.Balance += transactionForm.Amount;
+                    else
+                        wallet.Balance -= transactionForm.Amount;
+                }
+
+                // Actualiza datos
+                tr.Name = transactionForm.Name;
+                tr.Description = transactionForm.Description;
+                tr.Amount = transactionForm.Amount;
+                tr.WalletId = transactionForm.WalletId;
+                tr.CategoryId = transactionForm.CategoryId;
+                tr.IsIncome = transactionForm.IsIncome;
+                tr.IsUnexpected = transactionForm.IsUnexpected;
+                if (transactionForm.Tithe)
+                {
+                    AddTithe(tr, false);
+                }
+                tr.Tithe = transactionForm.Tithe;
+
+                // No modificar IsRecurring ni OriginalTransactionId aquí para no romper FK
+            }
+
+            await DbContext.SaveChangesAsync();
+        }
+        else
+        {
+            // Crear o editar una sola transacción
+            if (transactionForm.Id == 0)
+            {
+                // Nueva transacción
+
+                // Primero guarda la transacción original para obtener Id
+                DbContext.Transactions.Add(transactionForm);
+
+                // Guardamos primero para generar el Id
+                await DbContext.SaveChangesAsync();
+
+                if (transactionForm.Tithe)
+                {
+                    AddTithe(transactionForm, false);
+                }
+
+                //Aqui es el error
+                await DbContext.SaveChangesAsync();
+
+                // Si es recurrente, crea transacciones recurrentes usando el Id ya generado
+                if (transactionForm.IsRecurring)
+                {
+                    var interval = await DbContext.RecurrenceIntervals.FindAsync(transactionForm.RecurrenceIntervalId.Value);
+
+                    if (interval != null)
+                    {
+                        DateTime nextDate = transactionForm.Date;
+
+                        switch (transactionForm.RecurrenceEndType)
+                        {
+                            case RecurrenceEndType.EndDate:
+                                {
+                                    DateTime endDate = transactionForm.RecurrenceEndDate!.Value;
+                                    while (true)
+                                    {
+                                        nextDate = CalculateNextDate(nextDate, interval);
+                                        if (nextDate > endDate) break;
+                                        await AddRecurringTransaction(nextDate, interval, transactionForm);
+                                    }
+                                    break;
+                                }
+
+                            case RecurrenceEndType.NumberOfOccurrences:
+                                {
+                                    int repetitions = transactionForm.RecurrenceCount!.Value;
+                                    for (int i = 1; i < repetitions; i++)
+                                    {
+                                        nextDate = CalculateNextDate(nextDate, interval);
+                                        await AddRecurringTransaction(nextDate, interval, transactionForm);
+                                    }
+                                    break;
+                                }
+
+                            case RecurrenceEndType.UntilFurtherNotice:
+                                {
+                                    DateTime maxDate = nextDate.AddMonths(36);
+                                    while (true)
+                                    {
+                                        nextDate = CalculateNextDate(nextDate, interval);
+                                        if (nextDate > maxDate) break;
+                                        await AddRecurringTransaction(nextDate, interval, transactionForm);
+                                    }
+                                    break;
+                                }
+                        }
+
+                        await DbContext.SaveChangesAsync();
+                    }
+                }
+            }
+            else
+            {
+                // Editar transacción existente simple
+                var existingTransaction = await DbContext.Transactions.FindAsync(transactionForm.Id);
+                if (existingTransaction != null)
+                {
+                    var wallet = await DbContext.Wallets.FindAsync(existingTransaction.WalletId);
+                    if (wallet != null)
+                    {
+                        if (existingTransaction.IsIncome)
+                            wallet.Balance -= existingTransaction.Amount;
+                        else
+                            wallet.Balance += existingTransaction.Amount;
+
+                        if (transactionForm.IsIncome)
+                            wallet.Balance += transactionForm.Amount;
+                        else
+                            wallet.Balance -= transactionForm.Amount;
+                    }
+
+                    existingTransaction.Name = transactionForm.Name;
+                    existingTransaction.Description = transactionForm.Description;
+                    existingTransaction.Date = transactionForm.Date;
+
+                    existingTransaction.WalletId = transactionForm.WalletId;
+                    existingTransaction.CategoryId = transactionForm.CategoryId;
+                    existingTransaction.IsIncome = transactionForm.IsIncome;
+                    if (existingTransaction.Amount != transactionForm.Amount)
+                    {
+                        existingTransaction.IsUnexpected = true;
+                    }
+                    existingTransaction.Amount = transactionForm.Amount;
+                    existingTransaction.IsRecurring = transactionForm.IsRecurring;
+                    if (existingTransaction.Tithe != transactionForm.Tithe)
+                    {
+                        if (transactionForm.Tithe)
+                        {
+                            AddTithe(transactionForm, false);
+                        }
+                        else
+                        {
+                            //Si desmarca el tithe, entonces eliminamos las transacciones de Tithe
+                            await DeleteTitheAsync(existingTransaction.Id);
+                        }
+
+                    }
+                    existingTransaction.Tithe = transactionForm.Tithe;
+
+
+                    existingTransaction.RecurrenceIntervalId = transactionForm.RecurrenceIntervalId;
+                    existingTransaction.RecurrenceEndType = transactionForm.RecurrenceEndType;
+                    existingTransaction.RecurrenceCount = transactionForm.RecurrenceCount;
+                    existingTransaction.RecurrenceEndDate = transactionForm.RecurrenceEndDate;
+                    existingTransaction.OriginalTransactionId = transactionForm.OriginalTransactionId;
+
+                    await DbContext.SaveChangesAsync();
+                }
+            }
+        }
+
+        CloseModalTransaction();
+        await LoadData();
+        currentAction = ActionType.None;
+
+
+
+        var date = new DateTime(transactionForm.Date.Year, transactionForm.Date.Month, 1);
+
+        await LoadTransactions(date, date);
+    }
+
+    void StartEdit(Transaction t)
+    {
+        transactionForm = new Transaction
+            {
+                Id = t.Id,
+                Name = t.Name,
+                Date = t.Date,
+                Description = t.Description,
+                Amount = t.Amount,
+                WalletId = t.WalletId,
+                CategoryId = t.CategoryId,
+                IsRecurring = t.IsRecurring,
+                RecurrenceIntervalId = t.RecurrenceIntervalId,
+                RecurrenceEndDate = t.RecurrenceEndDate,
+                RecurrenceEndType = t.RecurrenceEndType,
+                OriginalTransactionId = t.OriginalTransactionId,
+                Tithe = t.Tithe,
+                IsUnexpected = t.IsUnexpected,
+                IsIncome = t.IsIncome,
+                SubTransactions = t.SubTransactions
+            };
+        isEditing = true;
+        showModalTransaction = true;
+        transactionModalTitle = "Edit Transaction";
+        showOptionsModal = false;
+    }
+
+    void EditTransaction(int transactionId)
+    {
+        transactionToEditOrDelete = DbContext.Transactions
+            .Include(t => t.Category)
+            .Include(t => t.Wallet)
+            .Include(t => t.SubTransactions)
+            .FirstOrDefault(t => t.Id == transactionId);
+
+        selectedWallet = wallets.FirstOrDefault(w => w.Id == transactionToEditOrDelete.WalletId);
+
+        currentAction = ActionType.Edit;
+
+        if (transactionToEditOrDelete.OriginalTransactionId != null || transactionToEditOrDelete.IsRecurring)
+        {
+            showOptionsModal = true; // Mostrar modal para elegir "Solo esta" o "Esta y futuras"
+        }
+        else
+        {
+            StartEdit(transactionToEditOrDelete);
+        }
+    }
+
+    private async Task ConfirmDelete()
+    {
+        showDeleteModal = false;
+        if (userChoice == RecurrenceActionChoice.OnlyThis)
+        {
+            DeleteTransactionSingle();
+
+        }
+        else
+        {
+            DbContext.Transactions.RemoveRange(transactionsToDelete);
+            await DbContext.SaveChangesAsync();
+            CloseModalTransaction();
+            await LoadData();
+            showOptionsModal = false;
+            showDeleteModal = false;
+            currentAction = ActionType.None;
+
+            // Obtener los meses únicos de las transacciones borradas
+            var months = transactionsToDelete
+                .Select(t => new DateTime(t.Date.Year, t.Date.Month, 1))
+                .Distinct();
+
+            await LoadTransactions(
+                new DateTime(transactionsToDelete.Min(t => t.Date).Year,
+                             transactionsToDelete.Min(t => t.Date).Month, 1),
+                new DateTime(transactionsToDelete.Max(t => t.Date).Year,
+                             transactionsToDelete.Max(t => t.Date).Month, 1)
+            );
+
+
+        }
+        message = "Deletion";
+        showSuccessModal = true;
+    }
+
+    private async Task DeleteTransaction(int transactionId)
+    {
+        transactionToEditOrDelete = DbContext.Transactions
+            .Include(t => t.Category)
+            .Include(t => t.Wallet)
+            .Include(t => t.SubTransactions)
+            .FirstOrDefault(t => t.Id == transactionId);
+
+        selectedWallet = wallets.FirstOrDefault(w => w.Id == transactionToEditOrDelete.WalletId);
+
+        currentAction = ActionType.Delete;
+
+        if (transactionToEditOrDelete.OriginalTransactionId != null || transactionToEditOrDelete.IsRecurring)
+        {
+            showOptionsModal = true; // Mostrar opciones
+        }
+        else
+        {
+            // Eliminar única → modal simple
+            transactionsToDelete = new List<Transaction> { transactionToEditOrDelete };
+            showDeleteModal = true;
+        }
+
+    }
+
+    async Task DeleteTransactionSingle()
+    {
+        var id = transactionToEditOrDelete.Id;
+        var fechaOriginal = transactionToEditOrDelete.Date; // Ajusta el nombre si tu propiedad de fecha es distinta
+
+        // Buscar dependientes que apuntan a la transacción actual
+        var dependientes = await DbContext.Transactions
+            .Where(t => t.OriginalTransactionId == id)
+            .OrderBy(t => t.Date) // Orden por fecha
+            .ToListAsync();
+
+        if (dependientes.Any())
+        {
+            // Seleccionar el más cercano en fecha pero mayor que la original
+            var nuevoOriginal = dependientes
+                .Where(t => t.Date > fechaOriginal)
+                .OrderBy(t => t.Date)
+                .FirstOrDefault();
+
+            if (nuevoOriginal != null)
+            {
+                // Reasignar los OriginalTransactionId al nuevo original
+                foreach (var dep in dependientes)
+                {
+                    dep.OriginalTransactionId = nuevoOriginal.Id;
+                }
+
+                // El nuevo original deja de apuntar a otro
+                nuevoOriginal.OriginalTransactionId = null;
+            }
+            else
+            {
+                // Si no hay uno con fecha mayor, tomamos el más antiguo como fallback
+                var fallback = dependientes.First();
+                foreach (var dep in dependientes)
+                {
+                    dep.OriginalTransactionId = fallback.Id;
+                }
+                fallback.OriginalTransactionId = null;
+            }
+        }
+
+        // Eliminar la transacción original
+        DbContext.Transactions.Remove(transactionToEditOrDelete);
+
+        await DbContext.SaveChangesAsync();
+        await LoadData();
+
+        showOptionsModal = false;
+        currentAction = ActionType.None;
+
+
+        var date = new DateTime(transactionToEditOrDelete.Date.Year, transactionToEditOrDelete.Date.Month, 1);
+
+        await LoadTransactions(date, date);
+    }
+
+    private async Task AddRecurringTransaction(DateTime date, RecurrenceInterval interval, Transaction original)
+    {
+        var newTransaction = new Transaction
+            {
+                Name = original.Name,
+                Description = original.Description,
+                Date = date,
+                Amount = original.Amount,
+                IsIncome = original.IsIncome,
+                WalletId = original.WalletId,
+                CategoryId = original.CategoryId,
+                IsRecurring = true,
+                Tithe = original.Tithe,
+                RecurrenceIntervalId = original.RecurrenceIntervalId,
+                RecurrenceEndType = original.RecurrenceEndType,
+                RecurrenceCount = original.RecurrenceCount,
+                RecurrenceEndDate = original.RecurrenceEndDate,
+                OriginalTransactionId = original.Id,
+                SubTransactions = original.SubTransactions,
+                IsUnexpected = await DbContext.Holds.AnyAsync(h =>
+                    h.WalletId == original.WalletId &&
+                    h.MonthHold.Year == date.Year &&
+                    h.MonthHold.Month == date.Month)
+            };
+
+        DbContext.Transactions.Add(newTransaction);
+
+        if (newTransaction.Tithe)
+        {
+            await AddTithe(newTransaction, false);
+        }
+    }
+
+    private void AddSubTransaction()
+    {
+        if (transactionForm.SubTransactions == null)
+            transactionForm.SubTransactions = new List<SubTransaction>();
+
+        var newSub = new SubTransaction();
+        transactionForm.SubTransactions.Add(newSub);
+
+        // No actualizamos el monto principal automáticamente; el usuario lo hace con el checkbox
+    }
+
+    private void RemoveSubTransaction(SubTransaction sub)
+    {
+        // Si la subtransaction estaba marcada como sumada, restamos su monto
+        if (sub.IsChecked)
+            transactionForm.Amount -= sub.Amount;
+
+        transactionForm.SubTransactions?.Remove(sub);
+    }
+
+    private void OnSubAmountChecked(SubTransaction sub, bool? isChecked)
+    {
+        sub.IsChecked = isChecked == true;
+
+        if (sub.IsChecked)
+            transactionForm.Amount += sub.Amount;
+        else
+        {
+            transactionForm.Amount -= sub.Amount;
+            if (transactionForm.Amount < 0)
+                transactionForm.Amount = 0;
+        }
+    }
+
+    async Task ShowDeleteModal()
+    {
+        if (userChoice == RecurrenceActionChoice.OnlyThis)
+        {
+            transactionsToDelete.Add(transactionToEditOrDelete);
+        }
+        else
+        {
+
+            int originalId = transactionToEditOrDelete.OriginalTransactionId ?? transactionToEditOrDelete.Id;
+            DateTime targetDate = transactionToEditOrDelete.Date;
+
+            transactionsToDelete = await DbContext.Transactions
+                .Where(tr =>
+                    (tr.OriginalTransactionId == originalId || tr.Id == originalId) &&
+                    tr.Date >= targetDate)
+                .OrderBy(tr => tr.Date)
+                .ToListAsync();
+
+        }
+
+        showDeleteModal = true;
+        showOptionsModal = false;
+    }
+
+    private void ShowModalTransaction()
+    {
+        if (selectedWallet == null)
+            return;
+
+        transactionForm = new Transaction
+            {
+                WalletId = selectedWallet.Id,
+                Date = DateTime.Today,
+                IsIncome = true,
+                IsRecurring = false,
+                RecurrenceIntervalId = null,
+                RecurrenceEndDate = null,
+                CategoryId = 0,
+                Description = string.Empty,
+                Amount = 0
+            };
+
+        showModalTransaction = true;
+        transactionModalTitle = "New Transaction";
+    }
+
+    private void CloseModalTransaction()
+    {
+        showModalTransaction = false;
+        currentAction = ActionType.None;
+    }
+
+    private void CloseDeleteModal()
+    {
+        showDeleteModal = false;
+        showOptionsModal = false;
+    }
+
+    private void CloseOptionsModal()
+    {
+        showOptionsModal = false;
+        currentAction = ActionType.None;
+    }
+
+    private void CloseSuccessModal()
+    {
+        showSuccessModal = false;
+    }
+
+    private void StartLongPress(int transactionId)
+    {
+        longPressTriggered = false;
+
+        longPressTimer?.Stop();
+        longPressTimer?.Dispose(); // evitar temporizadores pendientes
+        longPressTimer = new System.Timers.Timer(500);
+        longPressTimer.Elapsed += (s, e) =>
+        {
+            longPressTimer?.Stop();
+            InvokeAsync(() =>
+            {
+                longPressTriggered = true;
+                longPressTransactionId = transactionId;
+                StateHasChanged();
+            });
+        };
+        longPressTimer.AutoReset = false;
+        longPressTimer.Start();
+    }
+
+    private void ToggleOverlayIfSame(int transactionId)
+    {
+        if (longPressTransactionId == transactionId)
+        {
+            CloseOverlay();
+        }
+    }
+
+    [JSInvokable]
+    public void OnOutsideClickOrEsc()
+    {
+        CloseOverlay();
+    }
+
+    private void CloseOverlay()
+    {
+        // detener cualquier long press activo
+        longPressTimer?.Stop();
+        longPressTimer?.Dispose();
+        longPressTimer = null;
+
+        longPressTransactionId = null;
+        longPressTriggered = false;
+        StateHasChanged();
+    }
+
+    private DateTime CalculateNextDate(DateTime currentDate, RecurrenceInterval interval)
+    {
+        // Si DaysInterval es mayor que cero, se usa directamente
+        if (interval.DaysInterval > 0)
+        {
+            return currentDate.AddDays(interval.DaysInterval);
+        }
+
+        // Si DaysInterval es 0, se usa el Name para calcular el próximo
+        return interval.Name switch
+        {
+            "Monthly" => currentDate.AddMonths(1),
+            "Quarterly" => currentDate.AddMonths(3),
+            "Semester" => currentDate.AddMonths(6),
+            "Yearly" => currentDate.AddYears(1),
+            _ => currentDate.AddDays(1) // Fallback por defecto si no hay coincidencia
+        };
+    }
+
+    private string FormatAmount(decimal amount, string currencyCode)
+    {
+        var culture = currencyCode switch
+        {
+            "USD" => new System.Globalization.CultureInfo("en-US"),
+            "PEN" => new System.Globalization.CultureInfo("es-PE"),
+            "EUR" => new System.Globalization.CultureInfo("fr-FR"),
+            "BOB" => new System.Globalization.CultureInfo("es-BO"),
+            "GBP" => new System.Globalization.CultureInfo("en-GB"),
+            _ => System.Globalization.CultureInfo.InvariantCulture
+        };
+
+        return string.Format(culture, "{0:C}", amount);
+    }
+
+    private async Task SaveHold(int walletId, DateTime date, decimal balance)
+    {
+        using var context = DbFactory.CreateDbContext();
+
+        var hold = new Hold
+            {
+                WalletId = walletId,
+                MonthHold = date,
+                BalanceHold = balance
+            };
+
+        context.Holds.Add(hold);
+        await context.SaveChangesAsync();
+
+        message = "Hold";
+        showSuccessModal = true;
+
+        await LoadData(); // LoadData debe usar OTRO DbContext
+        await LoadTransactionsList(date.Year);
+    }
+
+    private async Task DeleteHold(int holdId)
+    {
+        using var context = DbFactory.CreateDbContext();
+
+        var hold = await context.Holds.FindAsync(holdId);
+
+        if (hold == null)
+            return;
+
+        // Eliminar el hold
+        context.Holds.Remove(hold);
+
+        // Actualizar transacciones relacionadas
+        await context.Transactions
+            .Where(t => t.IsUnexpected &&
+                        t.Date.Month == hold.MonthHold.Month &&
+                        t.Date.Year == hold.MonthHold.Year)
+            .ExecuteUpdateAsync(setters =>
+                setters.SetProperty(p => p.IsUnexpected, false)
+            );
+
+        // Guardar cambios (incluye el Remove)
+        await context.SaveChangesAsync();
+
+        // UI
+        message = "Hold";
+        showSuccessModal = true;
+
+        await LoadData(); // Debe usar OTRO DbContext
+        await LoadTransactionsList(hold.MonthHold.Year);
+    }
+
+    private async Task AddTithe(Transaction transaction, bool saveChanges)
+    {
+        var tithe = new Tithe
+            {
+                TransactionId = transaction.Id,
+                Name = transaction.Name,
+                Amount = transaction.Amount / 10,
+                Date = transaction.Date,
+                Payed = false, // o según corresponda
+                // Transaction = transaction
+            };
+
+        DbContext.Tithes.Add(tithe);
+
+        if (saveChanges)
+        {
+            await DbContext.SaveChangesAsync();
+            message = "Tithe";
+            showSuccessModal = true;
+        }
+
+    }
+
+    public async Task DeleteTitheAsync(int titheId)
+    {
+        var tithe = await DbContext.Tithes.FindAsync(titheId);
+        if (tithe != null)
+        {
+            DbContext.Tithes.Remove(tithe);
+            await DbContext.SaveChangesAsync();
+        }
+    }
+
+    public class SummaryColumn
+    {
+        public string Title { get; set; } = "";
+        public decimal TotalIncome { get; set; }
+        public decimal TotalExpense { get; set; }
+        public decimal TotalSurplus => TotalIncome - TotalExpense; // NO se asigna
+        public List<Transaction> Transactions { get; set; } = new();
+    }
+
+
+    private async Task BuildSemesterSummary(int year, int semester, DateTime startMonth, DateTime endMonth)
+    {
+        await LoadTransactions(startMonth, endMonth);
+
+        // Reinicia la lista
+        summaryColumns = new List<SummaryColumn>();
+
+        var transactions = groupedTransactions.Values.SelectMany(t => t).ToList();
+
+        decimal cumulativeIncome = 0;
+        decimal cumulativeExpense = 0;
+        var cumulativeTx = new List<Transaction>();
+
+        // --- Meses individuales (ACUMULADOS) ---
+        for (int m = startMonth.Month; m <= endMonth.Month; m++)
+        {
+            var monthTx = transactions
+                .Where(t => t.Date.Year == year &&
+                            t.Date.Month == m &&
+                            t.WalletId == selectedWallet.Id)
+                .OrderBy(t => t.Date)
+                .ToList();
+
+            cumulativeIncome += monthTx.Where(t => t.IsIncome).Sum(t => t.Amount);
+            cumulativeExpense += monthTx.Where(t => !t.IsIncome).Sum(t => t.Amount);
+            cumulativeTx.AddRange(monthTx);
+
+            summaryColumns.Add(new SummaryColumn
+                {
+                    Title = new DateTime(year, m, 1).ToString("MMM"),
+                    TotalIncome = cumulativeIncome,
+                    TotalExpense = cumulativeExpense,
+                    Transactions = cumulativeTx.ToList() // transacciones acumulativas
+                });
+        }
+
+        // --- Q1 (acumulado hasta el último mes del Q1) ---
+        // Después de agregar 6 meses (idx 0..5), marzo es idx 2.
+        summaryColumns.Insert(3, new SummaryColumn
+            {
+                Title = "Q1",
+                TotalIncome = summaryColumns[2].TotalIncome,
+                TotalExpense = summaryColumns[2].TotalExpense,
+                Transactions = summaryColumns[2].Transactions.ToList()
+            });
+
+        // --- Q2 (acumulado hasta el último mes del Q2) ---
+        // Tras insertar Q1 en idx 3, junio queda en idx 6.
+        int endOfSemesterIndex = 6;
+        summaryColumns.Insert(7, new SummaryColumn
+            {
+                Title = "Q2",
+                TotalIncome = summaryColumns[endOfSemesterIndex].TotalIncome,
+                TotalExpense = summaryColumns[endOfSemesterIndex].TotalExpense,
+                Transactions = summaryColumns[endOfSemesterIndex].Transactions.ToList()
+            });
+
+        // --- Semestre completo (acumulado final) ---
+        summaryColumns.Add(new SummaryColumn
+            {
+                Title = $"S {semester}",
+                TotalIncome = summaryColumns[endOfSemesterIndex].TotalIncome,
+                TotalExpense = summaryColumns[endOfSemesterIndex].TotalExpense,
+                Transactions = summaryColumns[endOfSemesterIndex].Transactions.ToList()
+            });
+    }
+
+    // Botón siempre habilitado, no dependiente del editor
+    private void OpenModalQuickNote()
+    {
+        showModalQuickNote = true;
+        _editorInitialized = false;  // Forzamos inicialización
+        StateHasChanged();            // Renderiza el modal primero
+    }
+
+    // Cerrar modal
+    private void CloseModalQuickNote()
+    {
+        showModalQuickNote = false;
+    }
+
+    private void AddQuickNoteItem()
+    {
+        quickNoteForm.Items ??= new List<QuickNoteItem>();
+        quickNoteForm.Items.Add(new QuickNoteItem());
+    }
+
+    private void RemoveQuickNoteItem(QuickNoteItem item)
+    {
+        quickNoteForm.Items?.Remove(item);
+    }
+
+    private void SaveQuickNote()
+    {
+        if (quickNoteForm == null || string.IsNullOrWhiteSpace(quickNoteForm.Title))
+            return;
+
+        if (quickNoteForm.Id == 0) // Nueva nota
+        {
+            DbContext.QuickNotes.Add(quickNoteForm);
+
+            if (quickNoteForm.Items != null)
+            {
+                foreach (var item in quickNoteForm.Items)
+                {
+                    DbContext.QuickNoteItems.Add(item);
+                }
+            }
+
+            quickNotes.Add(quickNoteForm); // Refrescar la lista
+        }
+        else // Editar nota existente
+        {
+            DbContext.QuickNotes.Update(quickNoteForm);
+
+            if (quickNoteForm.Items != null)
+            {
+                foreach (var item in quickNoteForm.Items)
+                {
+                    if (item.Id == 0) // Item nuevo
+                        DbContext.QuickNoteItems.Add(item);
+                    else // Item existente
+                        DbContext.QuickNoteItems.Update(item);
+                }
+            }
+
+            // Refrescar la lista local
+            var index = quickNotes.FindIndex(n => n.Id == quickNoteForm.Id);
+            if (index != -1)
+                quickNotes[index] = quickNoteForm;
+        }
+
+        DbContext.SaveChanges();
+
+        // Limpiar formulario
+        quickNoteForm = new QuickNote();
+        showNewNoteForm = false;
+        showNoteList = true;
+        showButtonAddNoteList = true;
+    }
+
+    private void SaveQuickNoteCategory()
+    {
+        if (quickNoteCategoryForm == null || string.IsNullOrWhiteSpace(quickNoteCategoryForm.Name))
+            return;
+
+        if (quickNoteCategoryForm.Id == 0) // Nueva categoría
+        {
+            DbContext.QuickNoteCategories.Add(quickNoteCategoryForm);
+            noteCategories.Add(quickNoteCategoryForm); // Refrescar la lista en UI
+        }
+        else // Editar categoría existente
+        {
+            DbContext.QuickNoteCategories.Update(quickNoteCategoryForm);
+
+            // Refrescar la lista local
+            var index = noteCategories.FindIndex(c => c.Id == quickNoteCategoryForm.Id);
+            if (index != -1)
+                noteCategories[index] = quickNoteCategoryForm;
+        }
+
+        DbContext.SaveChanges();
+
+        // Limpiar el formulario
+        quickNoteCategoryForm = new QuickNoteCategory();
+
+
+        showButtonAddCategoryNote = true;
+        showCategoryNoteList = true;
+        showNewCategoryNoteForm = false;
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        activeTab = tab;
+    }
+
+    // --- QuickNote ---
+    private void EditQuickNote(QuickNote note)
+    {
+        quickNoteForm = note;
+        showNewNoteForm = true;
+    }
+
+    private void DeleteQuickNote(QuickNote note)
+    {
+        if (note == null) return;
+
+        quickNotes.Remove(note);
+        DbContext.QuickNotes.Remove(note);
+        DbContext.SaveChanges();
+    }
+
+    private async Task CheckItem(QuickNoteItem quickNoteItem)
+    {
+        // Cambiar el valor (toggle)
+        quickNoteItem.Checked = !quickNoteItem.Checked;
+
+        // Adjuntar el item al contexto
+        DbContext.Attach(quickNoteItem);
+
+        // Indicar que solo la propiedad Checked ha cambiado
+        DbContext.Entry(quickNoteItem).Property(x => x.Checked).IsModified = true;
+
+        // Guardar cambios
+        await DbContext.SaveChangesAsync();
+    }
+
+    private async Task SaveNote()
+    {
+        if (!_editorInitialized || MyEditor is null)
+            return;
+
+        try
+        {
+            // Obtener contenido HTML del editor (incluye imágenes)
+            var htmlContent = await MyEditor.GetHTML();
+
+            // Buscar la nota existente
+            var note = await DbContext.Notes.FirstOrDefaultAsync();
+
+            if (note != null)
+            {
+                // Actualizar contenido y fecha de actualización
+                note.Content = htmlContent;
+                note.UpdatedAt = DateTime.Now;
+                DbContext.Notes.Update(note);
+            }
+            else
+            {
+                // Crear nota por primera vez
+                note = new Note
+                    {
+                        Content = htmlContent,
+                        CreatedAt = DateTime.Now
+                    };
+                DbContext.Notes.Add(note);
+            }
+            await DbContext.SaveChangesAsync();
+            ShowMessageSucccess(ToastType.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowMessageDanger(ToastType.Danger);
+            Console.WriteLine("Error guardando nota: " + ex.Message);
+        }
+    }
+
+
+
+    // --- QuickNoteCategory ---
+    private void EditQuickNoteCategory(QuickNoteCategory cat)
+    {
+        quickNoteCategoryForm = cat;
+        showNewCategoryNoteForm = true;
+        showButtonAddCategoryNote = false;
+    }
+
+    private void DeleteQuickNoteCategory(QuickNoteCategory cat)
+    {
+        if (cat == null) return;
+
+        noteCategories.Remove(cat);
+        DbContext.QuickNoteCategories.Remove(cat);
+        DbContext.SaveChanges();
+    }
+
+
+    public async Task RecalculatePreviousBalancesAsync(int walletId)
+    {
+        using var context = DbFactory.CreateDbContext();
+
+        var wallet = await context.Wallets.FindAsync(walletId);
+        if (wallet == null) return;
+
+        // Traemos todas las transacciones de esa wallet, ordenadas
+        var transactions = await context.Transactions
+            .Where(t => t.WalletId == walletId)
+            .OrderBy(t => t.Date)
+            .ToListAsync();
+
+        // Limpiamos los previous balances existentes
+        var existing = await context.PreviousBalances
+            .Where(pb => pb.WalletId == walletId)
+            .ToListAsync();
+
+        context.PreviousBalances.RemoveRange(existing);
+        await context.SaveChangesAsync();
+
+        // Balance inicial
+        decimal runningBalance = wallet.InitialBalance;
+
+        // Mes de inicio (creación de la wallet)
+        DateTime startDate = new DateTime(
+            wallet.CreatedDate.Year,
+            wallet.CreatedDate.Month,
+            1);
+
+        // Último mes con transacciones
+        DateTime lastTransactionMonth = transactions.Any()
+            ? new DateTime(
+                transactions.Max(t => t.Date).Year,
+                transactions.Max(t => t.Date).Month,
+                1)
+            : startDate;
+
+        // Iteramos mes a mes
+        for (var date = startDate; date <= lastTransactionMonth; date = date.AddMonths(1))
+        {
+            var monthStart = new DateTime(date.Year, date.Month, 1);
+            var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+
+            var monthTxs = transactions
+                .Where(t => t.Date >= monthStart && t.Date <= monthEnd)
+                .ToList();
+
+            runningBalance += monthTxs.Sum(t =>
+                t.IsIncome ? t.Amount : -t.Amount);
+
+            context.PreviousBalances.Add(new PreviousBalance
+                {
+                    WalletId = walletId,
+                    Month = monthStart,
+                    Balance = runningBalance
+                });
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+
+}

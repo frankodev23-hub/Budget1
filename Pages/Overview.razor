@@ -1,0 +1,177 @@
+﻿@page "/overview"
+@using System.Globalization
+@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject Budget1.Data.BudgetDbContext DbContext
+
+<h3>Transacciones por Wallet</h3>
+
+<div class="mb-3 row">
+    <div class="col">
+        <label>Desde:</label>
+        <InputDate @bind-Value="startDate" class="form-control" />
+    </div>
+    <div class="col">
+        <label>Hasta:</label>
+        <InputDate @bind-Value="endDate" class="form-control" />
+    </div>
+</div>
+
+<div class="mb-3">
+    <label>Wallets:</label>
+    <InputSelect @bind-Value="selectedWalletId" class="form-control">
+        <option value="0">Todos los wallets</option>
+        @if (wallets != null)
+        {
+            @foreach (var w in wallets)
+            {
+                <option value="@w.Id">@w.Name</option>
+            }
+        }
+    </InputSelect>
+</div>
+
+<button class="btn btn-primary mb-3" @onclick="FilterTransactions">Filtrar</button>
+
+@if (wallets != null && filteredTransactionsByWallet.Any())
+{
+    @foreach (var walletGroup in filteredTransactionsByWallet)
+    {
+        <h5>@walletGroup.WalletName</h5>
+        <table class="table table-striped table-bordered mb-4">
+            <thead>
+                <tr>
+                    <th>Transacción</th>
+                    <th>Diario</th>
+                    <th>Semanal</th>
+                    <th>4 Semanas</th>
+                    <th>Mensual</th>
+                    <th>Trimestral</th>
+                    <th>Semestral</th>
+                    <th>Anual</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var t in walletGroup.Transactions)
+                {
+                    <tr>
+                        <td>@t.Name</td>
+                        <td>@t.Daily.ToString("C")</td>
+                        <td>@t.Weekly.ToString("C")</td>
+                        <td>@t.FourWeeks.ToString("C")</td>
+                        <td>@t.Monthly.ToString("C")</td>
+                        <td>@t.Quarterly.ToString("C")</td>
+                        <td>@t.Semester.ToString("C")</td>
+                        <td>@t.Annual.ToString("C")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private DateTime startDate = DateTime.Now.AddYears(-1);
+    private DateTime endDate = DateTime.Now;
+
+    private List<Budget1.Models.Transaction> allTransactions = new List<Budget1.Models.Transaction>();
+    private List<Wallet>? wallets;
+
+    private int selectedWalletId = 0; // 0 = todos los wallets
+    private List<WalletAggregatedTransactions> filteredTransactionsByWallet = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWallets();
+        FilterTransactions();
+    }
+
+    async Task LoadWallets()
+    {
+        wallets = await DbContext.Wallets
+            .Include(w => w.MonthlyBudgets)
+            .OrderBy(w => w.Position)
+            .ToListAsync();
+
+        allTransactions = await DbContext.Transactions
+            .Where(t => wallets.Select(w => w.Id).Contains(t.WalletId))
+            .ToListAsync();
+    }
+
+    private void FilterTransactions()
+    {
+        IEnumerable<Wallet> walletsToProcess = selectedWalletId == 0
+            ? wallets
+            : wallets!.Where(w => w.Id == selectedWalletId);
+
+        filteredTransactionsByWallet = walletsToProcess
+            .Select(w =>
+            {
+                var transactions = allTransactions
+                    .Where(t => t.WalletId == w.Id && t.Date >= startDate && t.Date <= endDate)
+                    .GroupBy(t => t.Name)
+                    .Select(g =>
+                    {
+                        var total = g.Sum(t => t.IsIncome ? t.Amount : -t.Amount);
+
+                        int totalDays = (endDate - startDate).Days + 1;
+                        decimal daily = total / totalDays;
+
+                        int totalWeeks = totalDays / 7;
+                        decimal weekly = totalWeeks > 0 ? total / totalWeeks : total;
+
+                        int totalFourWeeks = totalDays / 28;
+                        decimal fourWeeks = totalFourWeeks > 0 ? total / totalFourWeeks : total;
+
+                        int totalMonths = ((endDate.Year - startDate.Year) * 12) + endDate.Month - startDate.Month + 1;
+                        decimal monthly = totalMonths > 0 ? total / totalMonths : total;
+
+                        int totalQuarters = (int)Math.Ceiling(totalMonths / 3.0);
+                        decimal quarterly = totalQuarters > 0 ? total / totalQuarters : total;
+
+                        int totalSemesters = (int)Math.Ceiling(totalMonths / 6.0);
+                        decimal semester = totalSemesters > 0 ? total / totalSemesters : total;
+
+                        decimal annual = total;
+
+                        return new AggregatedTransaction
+                            {
+                                Name = g.Key,
+                                Daily = daily,
+                                Weekly = weekly,
+                                FourWeeks = fourWeeks,
+                                Monthly = monthly,
+                                Quarterly = quarterly,
+                                Semester = semester,
+                                Annual = annual
+                            };
+                    }).ToList();
+
+                return new WalletAggregatedTransactions
+                    {
+                        WalletId = w.Id,
+                        WalletName = w.Name,
+                        Transactions = transactions
+                    };
+            }).ToList();
+    }
+
+    public class AggregatedTransaction
+    {
+        public string Name { get; set; } = "";
+        public decimal Daily { get; set; }
+        public decimal Weekly { get; set; }
+        public decimal FourWeeks { get; set; }
+        public decimal Monthly { get; set; }
+        public decimal Quarterly { get; set; }
+        public decimal Semester { get; set; }
+        public decimal Annual { get; set; }
+    }
+
+    public class WalletAggregatedTransactions
+    {
+        public int WalletId { get; set; }
+        public string WalletName { get; set; } = "";
+        public List<AggregatedTransaction> Transactions { get; set; } = new();
+    }
+}

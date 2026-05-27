@@ -1,0 +1,303 @@
+﻿@page "/recurrenceintervals"
+@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject Budget1.Data.BudgetDbContext DbContext
+
+<h3 class="mb-4">Recurrence Intervals</h3>
+
+@if (intervals == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <div>
+        <div class="rounded-2xl shadow p-3 bg-white mb-3">
+            <table class="table table-sm table-bordered mb-2 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Name</th>
+                        <th style="width: 60px;">Days</th>
+                        <th>Description</th>
+                        <th style="width: 120px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var interval in intervals)
+                    {
+                        <tr>
+                            <td>@interval.Name</td>
+                            <td class="text-center">@interval.DaysInterval</td>
+                            <td>@interval.Description</td>
+                            <td>
+                                <div class="d-flex gap-2 justify-content-center">
+                                    <button class="btn btn-warning btn-sm" @onclick="() => EditInterval(interval)">Edit</button>
+                                    <button class="btn btn-danger btn-sm" @onclick="() => DeleteInterval(interval)">Delete</button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <button class="btn btn-outline-info btn-sm" @onclick="() => showReferenceTable = !showReferenceTable">
+                @(showReferenceTable ? "Hide interval reference" : "Show interval reference")
+            </button>
+
+            @if (showReferenceTable)
+            {
+                <table class="table table-bordered table-sm mt-2">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Name</th>
+                            <th>DaysInterval</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Daily</td><td>1</td></tr>
+                        <tr><td>Weekly</td><td>7</td></tr>
+                        <tr><td>Every 2 Weeks</td><td>14</td></tr>
+                        <tr><td>Every 15 Days</td><td>15</td></tr>
+                        <tr><td>Monthly</td><td>0 (uses calendar month logic)</td></tr>
+                        <tr><td>Quarterly</td><td>0 (uses 3-month logic)</td></tr>
+                        <tr><td>Semester</td><td>0 (uses 6-month logic)</td></tr>
+                        <tr><td>Yearly</td><td>0 (uses annual logic)</td></tr>
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+<!-- Botón flotante -->
+<button class="fab-button" @onclick="ShowModal">+</button>
+
+<!-- Modal -->
+@if (showModal)
+{
+    <div class="modal-backdrop" @onclick="CloseModal">
+        <div class="modal-dialog modal-dialog-centered modal-sm" @onclick:stopPropagation>
+            <div class="modal-content p-3">
+                <EditForm Model="intervalForm" OnValidSubmit="SaveInterval">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">Name</label>
+                        <InputText class="form-control form-control-sm" @bind-Value="intervalForm.Name" @oninput="OnNameInput" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">Days Interval</label>
+                        <InputNumber class="form-control form-control-sm" @bind-Value="intervalForm.DaysInterval" disabled="@IsDaysIntervalDisabled" />
+                        <small class="text-muted fst-italic" style="font-size: 0.75rem;">
+                            Use 0 for intervals based on months or years (e.g. Monthly, Quarterly, Yearly).
+                        </small>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">Description</label>
+                        <InputTextArea class="form-control form-control-sm" @bind-Value="intervalForm.Description" rows="2" />
+                    </div>
+
+                    <div class="d-flex justify-content-between mt-3">
+                        <button type="submit" class="btn btn-primary btn-sm">@((isEditing) ? "Update" : "Add")</button>
+                        @if (isEditing)
+                        {
+                            <button type="button" class="btn btn-secondary btn-sm" @onclick="CancelEdit">Cancel</button>
+                        }
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="CloseModal">Close</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+
+@* Error message *@
+@if (!string.IsNullOrEmpty(deleteErrorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @deleteErrorMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<style>
+    /* Botón flotante */
+    .fab-button {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        width: 56px;
+        height: 56px;
+        font-size: 28px;
+        border-radius: 50%;
+        background-color: #0d6efd; /* bootstrap primary */
+        color: white;
+        border: none;
+        box-shadow: 0 4px 12px rgba(13, 110, 253, 0.6);
+        cursor: pointer;
+        transition: background-color 0.3s ease, box-shadow 0.3s ease, transform 0.2s ease;
+        animation: pulse 2.5s infinite;
+        z-index: 1050;
+    }
+
+        .fab-button:hover {
+            background-color: #0b5ed7;
+            box-shadow: 0 6px 18px rgba(11, 94, 215, 0.8);
+            transform: scale(1.1);
+        }
+    @@keyframes pulse {
+        0%, 100%
+
+    {
+        box-shadow: 0 0 0 0 rgba(13, 110, 253, 0.6);
+    }
+
+    50% {
+        box-shadow: 0 0 15px 8px rgba(13, 110, 253, 0);
+    }
+
+    }
+
+    /* Modal backdrop */
+    .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background-color: rgba(0,0,0,0.4);
+        backdrop-filter: blur(2px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1040;
+    }
+
+    /* Modal dialog small and centered */
+    .modal-dialog {
+        max-width: 360px;
+        width: 100%;
+        border-radius: 0.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    /* Table tweaks */
+    table {
+        font-size: 0.875rem;
+    }
+</style>
+
+@code {
+    private List<RecurrenceInterval> intervals;
+    private RecurrenceInterval intervalForm = new();
+    private bool isEditing = false;
+    private bool showModal = false;
+
+    private bool showReferenceTable = false;
+
+    private bool IsDaysIntervalDisabled { get; set; } = false;
+
+    string? deleteErrorMessage = null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadIntervals();
+    }
+
+    private async Task LoadIntervals()
+    {
+        intervals = await DbContext.RecurrenceIntervals.OrderBy(i => i.Name).ToListAsync();
+    }
+
+    private void EditInterval(RecurrenceInterval interval)
+    {
+        intervalForm = new RecurrenceInterval
+            {
+                Id = interval.Id,
+                Name = interval.Name,
+                DaysInterval = interval.DaysInterval,
+                Description = interval.Description
+            };
+        UpdateDaysIntervalDisabledState(intervalForm.Name);
+        isEditing = true;
+        showModal = true;
+    }
+
+    private void CancelEdit()
+    {
+        intervalForm = new RecurrenceInterval();
+        IsDaysIntervalDisabled = false;
+        isEditing = false;
+        showModal = false;
+    }
+
+    private void ShowModal()
+    {
+        intervalForm = new RecurrenceInterval();
+        IsDaysIntervalDisabled = false;
+        isEditing = false;
+        showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+    }
+
+    private void OnNameInput(ChangeEventArgs e)
+    {
+        var name = e.Value?.ToString() ?? string.Empty;
+        UpdateDaysIntervalDisabledState(name);
+    }
+
+    private void UpdateDaysIntervalDisabledState(string name)
+    {
+        var keywords = new[] { "monthly", "quarterly", "semester", "yearly" };
+        IsDaysIntervalDisabled = keywords.Any(k => name.ToLower().Contains(k));
+        if (IsDaysIntervalDisabled)
+        {
+            intervalForm.DaysInterval = 0;
+        }
+    }
+
+    private async Task SaveInterval()
+    {
+        if (isEditing)
+        {
+            var existing = await DbContext.RecurrenceIntervals.FindAsync(intervalForm.Id);
+            if (existing != null)
+            {
+                existing.Name = intervalForm.Name;
+                existing.DaysInterval = intervalForm.DaysInterval;
+                existing.Description = intervalForm.Description;
+                await DbContext.SaveChangesAsync();
+            }
+        }
+        else
+        {
+            DbContext.RecurrenceIntervals.Add(intervalForm);
+            await DbContext.SaveChangesAsync();
+        }
+
+        await LoadIntervals();
+        CancelEdit();
+    }
+
+    private async Task DeleteInterval(RecurrenceInterval interval)
+    {
+        // Verifica si hay transacciones asociadas a la categoría
+        bool hasTransactions = await DbContext.Transactions.AnyAsync(t => t.RecurrenceIntervalId == interval.Id);
+
+        if (hasTransactions)
+        {
+            deleteErrorMessage = "Cannot delete the category because it has associated transactions.";
+            return;
+        }
+
+        DbContext.RecurrenceIntervals.Remove(interval);
+        await DbContext.SaveChangesAsync();
+        deleteErrorMessage = null;
+        await LoadIntervals();
+    }
+}

@@ -1,0 +1,122 @@
+﻿@* Sidebar vertical colapsable con gradiente azul *@
+<div class="d-flex flex-column flex-shrink-0 p-3 vh-100 position-fixed sidebar
+            @(collapseNavMenu ? "collapsed" : "expanded")"
+     style="width:@(collapseNavMenu ? "4.5rem" : "220px");
+            transition: all 0.3s;
+            background: linear-gradient(to right, #011e3d, #034588);">
+
+    <!-- Botón Toggle -->
+    <button class="btn btn-outline-light mb-3 w-100 text-start"
+            @onclick="ToggleNavMenu">
+        <i class="bi @(collapseNavMenu ? "bi-arrow-bar-right" : "bi-arrow-bar-left")"></i>
+        <span class="ms-2 toggle-text @(collapseNavMenu ? "d-none" : "")">Menu</span>
+    </button>
+
+    <!-- Navegación -->
+    <ul class="nav nav-pills flex-column mb-auto">
+        <li class="nav-item">
+            <NavLink class="nav-link text-white" href="dashboard" Match="NavLinkMatch.All">
+                <i class="bi bi-house"></i>
+                @if (!collapseNavMenu)
+                {
+                    <span class="ms-2">Dashboard</span>
+                }
+            </NavLink>
+        </li>
+
+        <li>
+            <NavLink class="nav-link text-white" href="overview">
+                <i class="bi bi-cash-stack"></i>
+                @if (!collapseNavMenu)
+                {
+                    <span class="ms-2">Overview</span>
+                }
+            </NavLink>
+        </li>
+
+        <li>
+            <NavLink class="nav-link text-white" href="transactions">
+                <i class="bi bi-credit-card"></i>
+                @if (!collapseNavMenu)
+                {
+                    <span class="ms-2">Transactions</span>
+                }
+            </NavLink>
+        </li>
+
+        <li>
+            <NavLink class="nav-link text-white" href="categories">
+                <i class="bi bi-tags"></i>
+                @if (!collapseNavMenu)
+                {
+                    <span class="ms-2">Categories</span>
+                }
+            </NavLink>
+        </li>
+
+        <li>
+            <NavLink class="nav-link text-white" href="tithes">
+                <i class="bi bi-heart"></i>
+                @if (!collapseNavMenu)
+                {
+                    <span class="ms-2">Tithes</span>
+                }
+            </NavLink>
+        </li>
+
+        <li>
+            <NavLink class="nav-link text-white" href="holds">
+                <i class="bi bi-lock-fill"></i>
+                @if (!collapseNavMenu)
+                {
+                    <span class="ms-2">Hold</span>
+                }
+            </NavLink>
+        </li>
+
+        <li>
+            <NavLink class="nav-link text-white" href="recurrenceintervals">
+                <i class="bi bi-arrow-repeat"></i>
+                @if (!collapseNavMenu)
+                {
+                    <span class="ms-2">Recurrence</span>
+                }
+            </NavLink>
+        </li>
+    </ul>
+</div>
+
+<style>
+    /* 📱 MOBILE */
+    @@media (max-width: 768px) {
+        .sidebar.collapsed {
+            width: 4.5rem !important;
+        }
+
+        .sidebar.expanded {
+            width: 220px !important;
+        }
+
+        .sidebar .toggle-text {
+            display: none !important;
+        }
+    }
+
+    /* Desktop: ocultar texto del toggle cuando collapsed */
+    .sidebar.collapsed .toggle-text {
+        display: none;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public EventCallback<bool> OnToggle { get; set; }
+
+    private bool collapseNavMenu = false;
+
+    private async Task ToggleNavMenu()
+    {
+        collapseNavMenu = !collapseNavMenu;
+        await OnToggle.InvokeAsync(collapseNavMenu);
+    }
+}

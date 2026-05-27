@@ -1,0 +1,101 @@
+﻿@page "/holds"
+@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject Budget1.Data.BudgetDbContext DbContext
+
+<h3 class="mb-4">Month holded</h3>
+
+@if (holdsByWallet == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!holdsByWallet.Any())
+{
+    <p><em>No holds available yet.</em></p>
+}
+else
+{
+    foreach (var group in holdsByWallet)
+    {
+        <div class="card shadow-sm mb-4">
+            <div class="card-header text-white d-flex justify-content-between align-items-center"
+                 style="background-color: #6f42c1;">
+                <strong>@group.Key</strong>
+                <span class="badge bg-light text-dark">@group.Value.Count() records</span>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 20%;">Month</th>
+                            @* <th style="width: 20%;">Hour</th> *@
+                            <th style="width: 60%;" class="text-end">Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var hold in group.Value.OrderByDescending(h => h.MonthHold))
+                        {
+                            <tr>
+                                <td>@hold.MonthHold.ToString("MM/yyyy")</td>
+                                @* <td>@hold.MonthHold.ToString("HH:mm")</td> *@
+                                <td class="text-end">
+                                    @FormatAmount(@hold.BalanceHold, hold.Wallet.Currency)
+                                    <button class="btn btn-sm btn-outline-danger ms-2"
+                                            title="Eliminar"
+                                            @onclick="() => DeleteHold(hold.Id)">
+                                        <i class="bi bi-trash-fill"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private Dictionary<string, List<Hold>> holdsByWallet = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var holds = await DbContext.Holds
+            .Include(h => h.Wallet)
+            .ToListAsync();
+
+        holdsByWallet = holds
+            .GroupBy(h => h.Wallet.Name)
+            .ToDictionary(g => g.Key, g => g.ToList());
+    }
+
+    private async Task DeleteHold(int holdId)
+    {
+        var hold = await DbContext.Holds.FindAsync(holdId);
+        if (hold != null)
+        {
+            DbContext.Holds.Remove(hold);
+            await DbContext.SaveChangesAsync();
+
+            // Recargar lista
+            await OnInitializedAsync();
+            StateHasChanged();
+        }
+    }
+
+    private string FormatAmount(decimal amount, string currencyCode)
+    {
+        var culture = currencyCode switch
+        {
+            "USD" => new System.Globalization.CultureInfo("en-US"),
+            "PEN" => new System.Globalization.CultureInfo("es-PE"),
+            "EUR" => new System.Globalization.CultureInfo("fr-FR"),
+            "BOB" => new System.Globalization.CultureInfo("es-BO"),
+            "GBP" => new System.Globalization.CultureInfo("en-GB"),
+            _ => System.Globalization.CultureInfo.InvariantCulture
+        };
+
+        return string.Format(culture, "{0:C}", amount);
+    }
+
+}

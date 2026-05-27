@@ -1,0 +1,753 @@
+﻿@page "/dashboard"
+@using Budget1.Models
+@using Microsoft.EntityFrameworkCore
+@inject NavigationManager NavigationManager
+@inject Budget1.Data.BudgetDbContext DbContext
+@using System.Globalization
+@inject IJSRuntime JS
+
+
+<h4 class="mb-3">Wallet</h4>
+
+@if (wallets == null)
+{
+    <p><em>Loading...</em></p>
+}
+else if (!wallets.Any())
+{
+    <p><em>No wallets available yet.</em></p>
+}
+else
+{
+
+    <SortableList TItem="Wallet"
+                  Data="wallets"
+                  Context="w"
+                  OnUpdate="@OnWalletListUpdate">
+        <ItemTemplate>
+            <div class="card wallet-card @($"wallet-theme-{w.Theme}")"
+                 @onclick="() => ViewWallet(w.Id)">
+
+                <div class="wallet-card-header">
+                    <h3 class="card-title text-truncate" title="@w.Name">@w.Name</h3>
+                    <i class="bi bi-wallet2 wallet-icon"></i>
+                </div>
+
+                <p class="card-text">
+                    @{
+                    var walletTransactions = allTransactions
+                    .Where(t => t.WalletId == w.Id)
+                    .ToList();
+
+                    decimal? lastMonthBalance = CalculateAccumulatedBalance(w, walletTransactions);
+                }
+
+                @if (lastMonthBalance.HasValue)
+                {
+                    @FormatAmount(lastMonthBalance.Value, w.Currency)
+                    <br />
+                }
+                else
+                {
+                    @FormatAmount(w.InitialBalance, w.Currency)
+                    <br /> @* fallback *@
+                }
+
+                <span class="text-uppercase">@w.Currency</span>
+            </p>
+
+            <div class="btn-group w-100" role="group">
+                <button class="btn btn-sm btn-outline-warning"
+                        title="Edit"
+                        @onclick="() => EditWallet(w)"
+                @onclick:stopPropagation>
+                    <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger"
+                        title="Delete"
+                        @onclick="() => DeleteWallet(w)"
+                @onclick:stopPropagation>
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        </div>
+    </ItemTemplate>
+</SortableList>
+
+
+}
+
+<!-- BOTÓN FLOTANTE -->
+<div id="floatingContainer" style="position: fixed; bottom: 20px; right: 20px; display: flex; align-items: center; cursor: grab;">
+
+    <!-- Botón -->
+    <button class="btn btn-success rounded-circle"
+            style="width: 60px; height: 60px; font-size: 28px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+            @onclick="ShowCreateModal">
+        +
+    </button>
+    <!-- Área de arrastre -->
+    <div id="dragHandle" style="width: 16px; height: 60px; background: rgba(0,0,0,0.1); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 5px;">
+        <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+            <span style="width: 4px; height: 4px; background: #555; border-radius: 50%;"></span>
+        </div>
+    </div>
+
+</div>
+
+<!-- Modal -->
+<div class="modal fade @(showModal ? "show d-block" : "")" tabindex="-1" style="background-color: rgba(0,0,0,.5);" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <EditForm Model="walletForm" OnValidSubmit="SaveWallet">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="modal-header py-2">
+                    <h6 class="modal-title mb-0">@((isEditing ? "Edit Wallet" : "New Wallet"))</h6>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+
+                <div class="modal-body py-2">
+                    <div class="mb-2">
+                        <label class="form-label mb-1">Name</label>
+                        <InputText class="form-control form-control-sm" @bind-Value="walletForm.Name" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label mb-1">Creation Date</label>
+                        <InputDate class="form-control form-control-sm" @bind-Value="walletForm.CreatedDate" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label mb-1">Initial Balance</label>
+                        <InputNumber class="form-control form-control-sm" @bind-Value="walletForm.InitialBalance" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label mb-1">Currency</label>
+                        <InputSelect class="form-select form-select-sm" @bind-Value="walletForm.Currency">
+                            @foreach (var c in currencyOptions)
+                            {
+                                    <option value="@c.Code">@c.Name (@c.Symbol)</option>
+                            }
+                        </InputSelect>
+                    </div>
+
+                    <!-- 🎨 Selector de diseño -->
+                    <div class="mb-2">
+                        <label class="form-label mb-1">Wallet Design</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            @foreach (var theme in themes)
+                            {
+                                <div class="wallet-theme-option wallet-card @($"wallet-theme-{theme}") @(walletForm.Theme == theme ? "selected" : "")"
+                                     @onclick="@(() => SelectTheme(theme))">
+                                    @theme
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer py-2">
+                    <button type="submit" class="btn btn-primary btn-sm">@((isEditing ? "Update" : "Add"))</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @onclick="CloseModal">Cancel</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(deleteErrorMessage))
+{
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        @deleteErrorMessage
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+}
+
+<style>
+    /* ===== DESKTOP BASE ===== */
+    .wallet-card {
+        width: 320px;
+        border-radius: 1rem;
+        margin: 1rem;
+        padding: 1rem 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,.15);
+        transition: transform .25s ease, box-shadow .25s ease;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        gap: .75rem;
+    }
+
+        .wallet-card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 24px rgba(0,0,0,.3);
+        }
+
+    .wallet-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: .75rem;
+    }
+
+        .wallet-card-header h3 {
+            margin: 0;
+            font-size: 1.1rem;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+    .wallet-icon {
+        font-size: 2.5rem;
+        opacity: .6;
+    }
+
+    .wallet-card p.card-text {
+        margin: 0;
+        font-size: .9rem;
+    }
+
+    .wallet-card .btn-group {
+        gap: .5rem;
+    }
+
+    /* ===== MOBILE COMPACT ===== */
+    @@media (max-width: 768px) {
+        /* wrapper interno de SortableList */
+        .sortable-list
+
+    {
+        display: flex;
+        flex-direction: column;
+        gap: .5rem;
+        padding: 0 .25rem; /* menos padding para que el card llegue casi a los bordes */
+    }
+
+    .wallet-card {
+        width: calc(100% - 0.5rem); /* ocupar casi todo el ancho */
+        margin: 0 auto; /* centrado */
+        padding: .6rem .8rem; /* padding interno más pequeño */
+        border-radius: .75rem;
+        gap: .4rem;
+    }
+
+        .wallet-card:hover {
+            transform: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,.15);
+        }
+
+    .wallet-card-header h3 {
+        font-size: .95rem;
+    }
+
+    .wallet-icon {
+        font-size: 1.6rem;
+    }
+
+    .wallet-card p.card-text {
+        font-size: .8rem;
+        line-height: 1.2;
+    }
+
+    .wallet-card .btn-group {
+        margin-top: .25rem;
+        justify-content: flex-start; /* botones alineados al inicio */
+    }
+
+    .wallet-card .btn {
+        padding: .25rem .4rem;
+        font-size: .75rem;
+    }
+
+    }
+
+
+
+    /* 🎨 selector de temas */
+    .wallet-theme-option {
+        width: 60px;
+        height: 40px;
+        cursor: pointer;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        color: #333;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+        /* hover selector */
+        .wallet-theme-option:hover {
+            transform: scale(1.1);
+            box-shadow: 0 0 8px rgba(0,0,0,0.2);
+        }
+
+        /* selección del tema */
+        .wallet-theme-option.selected {
+            border: 3px solid #000;
+        }
+
+    /* Aplicar color blanco a todo el contenido si el tema no es default */
+    .wallet-card:not(.wallet-theme-default) {
+        color: #fff;
+    }
+
+        /* Ícono blanco */
+        .wallet-card:not(.wallet-theme-default) .wallet-icon {
+            color: #fff;
+        }
+
+        /* Botones con fondo transparente y texto blanco */
+        .wallet-card:not(.wallet-theme-default) .btn {
+            color: #fff;
+            border-color: #fff;
+        }
+
+            /* Hover de botones para que destaque */
+            .wallet-card:not(.wallet-theme-default) .btn:hover {
+                background-color: rgba(255, 255, 255, 0.15);
+                border-color: #fff;
+            }
+
+    /* 🎨 Temas con colores estándar de MS Word */
+    .wallet-theme-blue {
+        background: linear-gradient(to right, #2F5597, #4472C4); /* Azul oscuro → azul medio */
+        color: #fff;
+    }
+
+    .wallet-theme-red {
+        background: linear-gradient(to right, #C00000, #FF0000); /* Rojo oscuro → rojo */
+        color: #fff;
+    }
+
+    .wallet-theme-green {
+        background: linear-gradient(to right, #006100, #00B050); /* Verde oscuro → verde medio */
+        color: #fff;
+    }
+
+    .wallet-theme-orange {
+        background: linear-gradient(to right, #ED7D31, #F4B183); /* Naranja → naranja claro */
+        color: #fff;
+    }
+
+    .wallet-theme-purple {
+        background: linear-gradient(to right, #5F497A, #8064A2); /* Morado oscuro → morado claro */
+        color: #fff;
+    }
+
+    .wallet-theme-yellow {
+        background: linear-gradient(to right, #BF9000, #FFD966); /* Amarillo oscuro → amarillo claro */
+        color: #000; /* mejor contraste */
+    }
+
+    .wallet-theme-teal {
+        background: linear-gradient(to right, #317873, #00B0F0); /* Verde azulado → celeste */
+        color: #fff;
+    }
+
+    .wallet-theme-gray {
+        background: linear-gradient(to right, #595959, #A6A6A6); /* Gris oscuro → gris claro */
+        color: #fff;
+    }
+
+    .wallet-theme-pink {
+        background: linear-gradient(to right, #C91C74, #E36C9A); /* Rosa oscuro → rosa claro */
+        color: #fff;
+    }
+
+    .wallet-theme-brown {
+        background: linear-gradient(to right, #7B4F2F, #A0522D); /* Marrón oscuro → marrón medio */
+        color: #fff;
+    }
+
+    .wallet-theme-turquoise {
+        background: linear-gradient(to right, #20B2AA, #40E0D0); /* Turquesa oscuro → turquesa claro */
+        color: #fff;
+    }
+
+    .wallet-theme-black {
+        background: linear-gradient(to right, #000000, #434343); /* Negro → gris oscuro */
+        color: #fff;
+    }
+
+
+
+
+    /* texto e íconos blancos si el tema no es default */
+    .wallet-card.wallet-theme-green,
+    .wallet-card.wallet-theme-red,
+    .wallet-card.wallet-theme-blue,
+    .wallet-card.wallet-theme-yellow,
+    .wallet-card.wallet-theme-purple, 
+    .wallet-card.wallet-theme-pink, 
+    .wallet-card.wallet-theme-brown,
+    .wallet-card.wallet-theme-turquoise,
+    .wallet-card.wallet-theme-black {
+        color: #fff;
+    }
+
+        .wallet-card.wallet-theme-green .wallet-icon,
+        .wallet-card.wallet-theme-red .wallet-icon,
+        .wallet-card.wallet-theme-blue .wallet-icon,
+        .wallet-card.wallet-theme-yellow .wallet-icon,
+        .wallet-card.wallet-theme-purple .wallet-icon,
+        .wallet-card.wallet-theme-pink .wallet-icon,
+        .wallet-card.wallet-theme-brown .wallet-icon,
+        .wallet-card.wallet-theme-turquoise .wallet-icon,
+        .wallet-card.wallet-theme-black .wallet-icon {
+            color: #fff;
+        }
+
+</style>
+
+@code {
+
+    List<Wallet>? wallets;
+    Wallet walletForm = new();
+    bool isEditing = false;
+    int? selectedWalletId;
+    Wallet? selectedWallet;
+    bool isZoomed = false;
+
+    bool showModal = false;
+
+    decimal monthlyBudgetAmount;
+
+    string? deleteErrorMessage = null;
+
+    record CurrencyOption(string Code, string Name, string Symbol);
+    private List<string> themes = new()
+{
+    "blue",
+    "red",
+    "green",
+    "orange",
+    "purple",
+    "yellow",
+    "teal",
+    "gray",
+    "pink",
+    "brown",
+    "turquoise",
+    "black"
+};
+
+    private List<Transaction> allTransactions = new List<Transaction>();
+
+
+    void ViewWallet(int walletId)
+    {
+        NavigationManager.NavigateTo($"/budgets?walletId={walletId}");
+    }
+
+    List<CurrencyOption> currencyOptions = new()
+    {
+        new CurrencyOption("USD", "US Dollar", "$"),
+        new CurrencyOption("EUR", "Euro", "€"),
+        new CurrencyOption("GBP", "British Pound", "£"),
+        new CurrencyOption("BOB", "Bolivian Peso", "Bs."),
+        new CurrencyOption("PEN", "Peruvian Sol", "S/"),
+        new CurrencyOption("BRL", "Brazilian Real", "R$"),
+    };
+
+    private async Task OnWalletListUpdate(SortableListEventArgs args)
+    {
+        // Reordenamos la lista local
+        var itemToMove = wallets[args.OldIndex];
+        wallets.RemoveAt(args.OldIndex);
+
+        if (args.NewIndex < wallets.Count)
+            wallets.Insert(args.NewIndex, itemToMove);
+        else
+            wallets.Add(itemToMove);
+
+        // Reasignamos nuevas posiciones
+        for (int i = 0; i < wallets.Count; i++)
+        {
+            wallets[i].Position = i;
+        }
+
+        // Guardamos los cambios en la base de datos
+        foreach (var wallet in wallets)
+        {
+            DbContext.Wallets.Update(wallet);
+        }
+
+        await DbContext.SaveChangesAsync();
+
+        StateHasChanged();
+    }
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadWallets();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("makeDraggableWithHandle", "floatingContainer", "dragHandle");
+        }
+    }
+
+    async Task LoadWallets()
+    {
+        wallets = await DbContext.Wallets
+        .Include(w => w.MonthlyBudgets) // Incluye los presupuestos mensuales
+        .OrderBy(w => w.Position)
+        .ToListAsync();
+
+        // 2. Cargar todas las transacciones de todos los wallets
+        allTransactions = await DbContext.Transactions
+            .Where(t => wallets.Select(w => w.Id).Contains(t.WalletId))
+            .ToListAsync();
+    }
+
+    private async Task<List<Transaction>> GetWalletTransactionsAsync(int walletId)
+    {
+        return await DbContext.Transactions
+            .Where(t => t.WalletId == walletId)
+            .ToListAsync();
+    }
+
+
+    void ShowCreateModal()
+    {
+        walletForm = new();
+        walletForm.CreatedDate = DateTime.Now; // Establece la fecha de creación al momento actual
+        isEditing = false;
+        showModal = true;
+    }
+
+    void EditWallet(Budget1.Models.Wallet wallet)
+    {
+        walletForm = new Budget1.Models.Wallet
+            {
+                Id = wallet.Id,
+                Name = wallet.Name,
+                Balance = wallet.Balance,
+                InitialBalance = wallet.InitialBalance,
+                Currency = wallet.Currency,
+                CreatedDate = wallet.CreatedDate,
+                Theme = wallet.Theme,
+                MonthlyBudgets = wallet.MonthlyBudgets
+            };
+
+        var currentBudget = wallet.MonthlyBudgets.FirstOrDefault(b => b.Year == DateTime.Now.Year && b.Month == DateTime.Now.Month);
+        monthlyBudgetAmount = currentBudget?.BudgetAmount ?? 0;
+
+        isEditing = true;
+        showModal = true;
+    }
+
+    async Task SaveWallet()
+    {
+        if (isEditing)
+        {
+            var existing = await DbContext.Wallets
+                .Include(w => w.MonthlyBudgets)
+                .FirstOrDefaultAsync(w => w.Id == walletForm.Id);
+
+            if (existing != null)
+            {
+                existing.Name = walletForm.Name;
+                existing.Balance = walletForm.Balance;
+                existing.InitialBalance = walletForm.InitialBalance;
+                existing.CreatedDate = walletForm.CreatedDate;
+                existing.Currency = walletForm.Currency;
+                existing.Theme = string.IsNullOrWhiteSpace(walletForm.Theme)? "default": walletForm.Theme; // ✅ Guardar el tema seleccionado o 'default' si es null o vacío
+
+                var budget = existing.MonthlyBudgets
+                    .FirstOrDefault(b => b.Year == DateTime.Now.Year && b.Month == DateTime.Now.Month);
+
+                if (budget != null)
+                {
+                    budget.BudgetAmount = monthlyBudgetAmount;
+                }
+                else
+                {
+                    existing.MonthlyBudgets.Add(new MonthlyBudget
+                        {
+                            Year = DateTime.Now.Year,
+                            Month = DateTime.Now.Month,
+                            BudgetAmount = monthlyBudgetAmount
+                        });
+                }
+            }
+        }
+        else
+        {
+            walletForm.CreatedDate = DateTime.Now;
+
+            // 🔽 Obtener la posición siguiente (max + 1)
+            var maxPosition = await DbContext.Wallets.MaxAsync(w => (int?)w.Position) ?? -1;
+            walletForm.Position = maxPosition + 1;
+
+            DbContext.Wallets.Add(walletForm);
+
+            if (monthlyBudgetAmount > 0)
+            {
+                walletForm.MonthlyBudgets = new List<MonthlyBudget>
+            {
+                new MonthlyBudget
+                {
+                    Year = DateTime.Now.Year,
+                    Month = DateTime.Now.Month,
+                    BudgetAmount = monthlyBudgetAmount
+                }
+            };
+            }
+        }
+
+        await DbContext.SaveChangesAsync();
+        walletForm = new();
+        monthlyBudgetAmount = 0;
+        isEditing = false;
+        showModal = false;
+        await LoadWallets();
+    }
+
+    void SelectTheme(string theme)
+    {
+        walletForm.Theme = theme;
+        StateHasChanged(); // Forzar render para que se vea seleccionado
+    }
+
+    void CancelEdit()
+    {
+        walletForm = new();
+        isEditing = false;
+        showModal = false;
+    }
+
+    void CloseModal()
+    {
+        CancelEdit();
+    }
+
+    async Task DeleteWallet(Budget1.Models.Wallet wallet)
+    {
+        // Verifica si hay transacciones asociadas al wallet
+        bool hasTransactions = await DbContext.Transactions.AnyAsync(t => t.WalletId == wallet.Id);
+
+        if (hasTransactions)
+        {
+            deleteErrorMessage = "Cannot delete the wallet because it has associated transactions.";
+            return;
+        }
+
+        DbContext.Wallets.Remove(wallet);
+        await DbContext.SaveChangesAsync();
+
+        // Reordena las posiciones de los wallets restantes
+        var walletsOrdered = await DbContext.Wallets
+            .OrderBy(w => w.Position)
+            .ToListAsync();
+
+        for (int i = 0; i < walletsOrdered.Count; i++)
+        {
+            if (walletsOrdered[i].Position != i)
+            {
+                walletsOrdered[i].Position = i;
+            }
+        }
+
+        await DbContext.SaveChangesAsync();
+
+        deleteErrorMessage = null;
+        await LoadWallets();
+    }
+
+    string GetCultureFromCurrency(string currency)
+    {
+        return currency switch
+        {
+            "USD" => "en-US",
+            "EUR" => "fr-FR",
+            "GBP" => "en-GB",
+            "BOB" => "es-BO",
+            "PEN" => "es-PE",
+            "BRL" => "pt-BR",
+            _ => "en-US"
+        };
+    }
+
+    private async Task OnWalletOrderChanged(List<Wallet> newOrder)
+    {
+        for (int i = 0; i < newOrder.Count; i++)
+        {
+            var wallet = newOrder[i];
+            var walletInDb = await DbContext.Wallets.FindAsync(wallet.Id);
+            if (walletInDb != null)
+            {
+                walletInDb.Position = i;
+            }
+        }
+
+        await DbContext.SaveChangesAsync();
+        await LoadWallets(); // refresca la lista desde DB
+    }
+
+    private string FormatAmount(decimal amount, string currencyCode)
+    {
+        var culture = currencyCode switch
+        {
+            "USD" => new System.Globalization.CultureInfo("en-US"),
+            "PEN" => new System.Globalization.CultureInfo("es-PE"),
+            "EUR" => new System.Globalization.CultureInfo("fr-FR"),
+            "BOB" => new System.Globalization.CultureInfo("es-BO"),
+            "GBP" => new System.Globalization.CultureInfo("en-GB"),
+            _ => System.Globalization.CultureInfo.InvariantCulture
+        };
+
+        return string.Format(culture, "{0:C}", amount);
+    }
+
+    // Antes (causaba el error)
+    // private Dictionary<(Guid WalletId, DateTime MonthStart), decimal> cumulativeBalances = new();
+
+    // Ahora (coincide con Wallet.Id = int)
+    private Dictionary<(int WalletId, DateTime MonthStart), decimal> cumulativeBalances = new();
+
+
+    decimal? CalculateAccumulatedBalance(Wallet w, List<Transaction> allTransactions)
+    {
+        if ((allTransactions == null || !allTransactions.Any()) && w.InitialBalance == 0)
+            return null;
+
+        decimal balance = 0m;
+        var firstMonth = new DateTime(w.CreatedDate.Year, w.CreatedDate.Month, 1);
+        var lastMonth = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+
+        for (var date = firstMonth; date <= lastMonth; date = date.AddMonths(1))
+        {
+            var monthTransactions = allTransactions
+                .Where(t => t.WalletId == w.Id && t.Date.Year == date.Year && t.Date.Month == date.Month);
+
+            decimal monthTotal = monthTransactions.Sum(t => t.IsIncome ? t.Amount : -t.Amount);
+
+            if (date == firstMonth)
+            {
+                monthTotal += w.InitialBalance;
+            }
+
+            balance += monthTotal;
+        }
+
+        return balance;
+    }
+
+
+}
+
